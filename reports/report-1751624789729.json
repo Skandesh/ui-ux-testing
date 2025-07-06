@@ -1,0 +1,26 @@
+{
+  "id": 1751624789729,
+  "timestamp": "2025-07-04T10:26:29.729Z",
+  "dimensions": {
+    "width": 360,
+    "height": 577
+  },
+  "totalPixels": 207720,
+  "diffPixels": 9905,
+  "matchedPixels": 197815,
+  "similarity": "95.23",
+  "figmaImage": "/uploads/figmaDesign-1751624789190-79939529-resized.png",
+  "renderedImage": "/uploads/renderedScreen-1751624789191-794532283-resized.png",
+  "diffImage": "/uploads/diff-1751624789355.png",
+  "overlayImage": "/uploads/overlay-1751624789701.png",
+  "diffRegions": 1,
+  "significantDifferences": [
+    {
+      "minX": 0,
+      "minY": 0,
+      "maxX": 359,
+      "maxY": 576,
+      "pixelCount": 207720
+    }
+  ]
+}

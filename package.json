@@ -1,0 +1,26 @@
+{
+  "name": "uiux-testing",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "nodemon server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "multer": "^2.0.1",
+    "openai": "^4.104.0",
+    "pixelmatch": "^7.1.0",
+    "pngjs": "^7.0.0",
+    "sharp": "^0.34.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}

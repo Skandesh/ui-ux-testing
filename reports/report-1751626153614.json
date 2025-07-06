@@ -1,0 +1,218 @@
+{
+  "id": 1751626153614,
+  "timestamp": "2025-07-04T10:49:13.614Z",
+  "dimensions": {
+    "width": 360,
+    "height": 577
+  },
+  "totalPixels": 207720,
+  "diffPixels": 9905,
+  "matchedPixels": 197815,
+  "similarity": "95.23",
+  "figmaImage": "/uploads/figmaDesign-1751626153093-725296832-resized.png",
+  "renderedImage": "/uploads/renderedScreen-1751626153094-500627136-resized.png",
+  "diffImage": "/uploads/diff-1751626153301.png",
+  "overlayImage": "/uploads/overlay-1751626153588.png",
+  "diffRegions": 1,
+  "significantDifferences": [
+    {
+      "minX": 0,
+      "minY": 0,
+      "maxX": 359,
+      "maxY": 576,
+      "pixelCount": 207720
+    }
+  ],
+  "colorAnalysis": {
+    "figmaColors": {
+      "dominant": "#f8f8f8",
+      "palette": [
+        {
+          "hex": "#f7fafc",
+          "rgb": {
+            "r": 247,
+            "g": 250,
+            "b": 252
+          },
+          "frequency": 1118
+        },
+        {
+          "hex": "#ffffff",
+          "rgb": {
+            "r": 255,
+            "g": 255,
+            "b": 255
+          },
+          "frequency": 600
+        },
+        {
+          "hex": "#f5fafd",
+          "rgb": {
+            "r": 245,
+            "g": 250,
+            "b": 253
+          },
+          "frequency": 50
+        },
+        {
+          "hex": "#f3f7fa",
+          "rgb": {
+            "r": 243,
+            "g": 247,
+            "b": 250
+          },
+          "frequency": 48
+        },
+        {
+          "hex": "#f6fafc",
+          "rgb": {
+            "r": 246,
+            "g": 250,
+            "b": 252
+          },
+          "frequency": 37
+        },
+        {
+          "hex": "#fbfcfd",
+          "rgb": {
+            "r": 251,
+            "g": 252,
+            "b": 253
+          },
+          "frequency": 34
+        },
+        {
+          "hex": "#f5f9fc",
+          "rgb": {
+            "r": 245,
+            "g": 249,
+            "b": 252
+          },
+          "frequency": 32
+        },
+        {
+          "hex": "#f4f7fa",
+          "rgb": {
+            "r": 244,
+            "g": 247,
+            "b": 250
+          },
+          "frequency": 31
+        },
+        {
+          "hex": "#f4f8fa",
+          "rgb": {
+            "r": 244,
+            "g": 248,
+            "b": 250
+          },
+          "frequency": 30
+        },
+        {
+          "hex": "#f4f8fb",
+          "rgb": {
+            "r": 244,
+            "g": 248,
+            "b": 251
+          },
+          "frequency": 28
+        }
+      ]
+    },
+    "renderedColors": {
+      "dominant": "#f8f8f8",
+      "palette": [
+        {
+          "hex": "#ffffff",
+          "rgb": {
+            "r": 255,
+            "g": 255,
+            "b": 255
+          },
+          "frequency": 1412
+        },
+        {
+          "hex": "#fefefe",
+          "rgb": {
+            "r": 254,
+            "g": 254,
+            "b": 254
+          },
+          "frequency": 136
+        },
+        {
+          "hex": "#f8fafb",
+          "rgb": {
+            "r": 248,
+            "g": 250,
+            "b": 251
+          },
+          "frequency": 102
+        },
+        {
+          "hex": "#f9fafc",
+          "rgb": {
+            "r": 249,
+            "g": 250,
+            "b": 252
+          },
+          "frequency": 61
+        },
+        {
+          "hex": "#fafbfc",
+          "rgb": {
+            "r": 250,
+            "g": 251,
+            "b": 252
+          },
+          "frequency": 55
+        },
+        {
+          "hex": "#fdfdfd",
+          "rgb": {
+            "r": 253,
+            "g": 253,
+            "b": 253
+          },
+          "frequency": 51
+        },
+        {
+          "hex": "#fcfdfe",
+          "rgb": {
+            "r": 252,
+            "g": 253,
+            "b": 254
+          },
+          "frequency": 45
+        },
+        {
+          "hex": "#f9fafb",
+          "rgb": {
+            "r": 249,
+            "g": 250,
+            "b": 251
+          },
+          "frequency": 39
+        },
+        {
+          "hex": "#fafcfc",
+          "rgb": {
+            "r": 250,
+            "g": 252,
+            "b": 252
+          },
+          "frequency": 39
+        },
+        {
+          "hex": "#fcfdfd",
+          "rgb": {
+            "r": 252,
+            "g": 253,
+            "b": 253
+          },
+          "frequency": 28
+        }
+      ]
+    }
+  }
+}

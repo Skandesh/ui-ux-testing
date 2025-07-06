@@ -1,0 +1,16 @@
+{
+  "id": 1751567399468,
+  "timestamp": "2025-07-03T18:29:59.468Z",
+  "dimensions": {
+    "width": 360,
+    "height": 577
+  },
+  "totalPixels": 207720,
+  "diffPixels": 18515,
+  "matchedPixels": 189205,
+  "similarity": "91.09",
+  "figmaImage": "/uploads/figmaDesign-1751567399248-498659098-resized.png",
+  "renderedImage": "/uploads/renderedScreen-1751567399249-264953632-resized.png",
+  "diffImage": "/uploads/diff-1751567399374.png",
+  "enhancedDiffImage": "/uploads/enhanced-diff-1751567399434.png"
+}

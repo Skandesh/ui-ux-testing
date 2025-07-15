@@ -14,6 +14,7 @@
         <div class="tabs hidden" id="resultTabs">
             <button class="tab-button active" onclick="showResultTab('overview')">Comparison Overview</button>
             <button class="tab-button" onclick="showResultTab('detailed')">Detailed Analysis</button>
+            <button class="tab-button" onclick="showResultTab('fields')">Field Analysis</button>
             <button class="tab-button" onclick="showResultTab('ai-analysis')">AI Analysis</button>
         </div>
         
@@ -56,8 +57,67 @@
                         </div>
                     </div>
                     
-                    <button type="submit" class="compare-btn">Compare Images</button>
+                    <div class="button-group">
+                        <button type="submit" class="compare-btn">Compare Images</button>
+                        <button type="button" id="rawAnalyzeBtn" class="compare-btn raw-btn">Raw Analysis (No AI)</button>
+                    </div>
                 </form>
+            </div>
+        </div>
+        
+        <!-- OpenAI Field Detection Tool -->
+        <div class="field-detection-tool">
+            <h2>🔍 OpenAI Field Detection Tool</h2>
+            <p class="tool-description">Test what OpenAI detects in your UI screenshots</p>
+            
+            <div class="detection-upload-section">
+                <div class="detection-inputs">
+                    <div class="input-group">
+                        <label for="detectionImage">Upload Screenshot</label>
+                        <input type="file" id="detectionImage" accept="image/*" />
+                        <div id="detectionImagePreview" class="image-preview"></div>
+                    </div>
+                    <div class="input-group">
+                        <label for="detectionApiKey">OpenAI API Key</label>
+                        <input type="password" id="detectionApiKey" placeholder="sk-..." />
+                    </div>
+                    <button id="detectFieldsBtn" class="detect-btn">Detect Fields</button>
+                </div>
+                
+                <div id="detectionLoading" class="detection-loading hidden">
+                    <div class="spinner"></div>
+                    <p>Analyzing image with OpenAI...</p>
+                </div>
+                
+                <div id="detectionResults" class="detection-results hidden">
+                    <h3>Detection Results</h3>
+                    
+                    <div class="detection-summary">
+                        <div class="summary-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">Total Elements</span>
+                                <span id="totalDetected" class="stat-value">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Screen Type</span>
+                                <span id="detectedScreenType" class="stat-value">-</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="detected-elements">
+                        <h4>Detected Elements</h4>
+                        <div id="elementsList" class="elements-list"></div>
+                    </div>
+                    
+                    <div class="raw-response">
+                        <h4>Raw OpenAI Response</h4>
+                        <details>
+                            <summary>View Raw JSON</summary>
+                            <pre id="rawDetectionResponse"></pre>
+                        </details>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -67,6 +127,15 @@
         </div>
         
         <div id="results" class="results hidden">
+            <!-- Dimension Validation Warning -->
+            <div id="dimensionWarning" class="dimension-warning hidden">
+                <div class="warning-icon">⚠️</div>
+                <div class="warning-content">
+                    <h4>Dimension Mismatch Detected</h4>
+                    <p id="dimensionWarningMessage"></p>
+                </div>
+            </div>
+            
             <div id="overview-tab" class="result-tab-content active">
             <div class="similarity-score">
                 <h2>Similarity Score</h2>
@@ -195,6 +264,76 @@
                                 <span class="category-label">Size Differences</span>
                                 <span class="category-count" id="sizeDiffCount">-</span>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="fields-tab" class="result-tab-content">
+                <div class="fields-analysis">
+                    <h2>Field-Based Analysis</h2>
+                    
+                    <!-- Screen Type Detection -->
+                    <div class="screen-type-section">
+                        <h3>Screen Type Detection</h3>
+                        <div class="screen-type-info">
+                            <div class="screen-type-result">
+                                <span class="label">Detected Type:</span>
+                                <span id="screenType" class="value">-</span>
+                                <span id="screenTypeConfidence" class="confidence">-</span>
+                            </div>
+                            <div id="screenTypeIndicators" class="indicators"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Field Summary -->
+                    <div class="field-summary">
+                        <h3>Field Analysis Summary</h3>
+                        <div class="summary-grid">
+                            <div class="summary-item">
+                                <span class="label">Expected Fields</span>
+                                <span id="expectedFieldCount" class="value">0</span>
+                            </div>
+                            <div class="summary-item">
+                                <span class="label">Detected Fields</span>
+                                <span id="detectedFieldCount" class="value">0</span>
+                            </div>
+                            <div class="summary-item">
+                                <span class="label">Match Rate</span>
+                                <span id="fieldMatchRate" class="value">0%</span>
+                            </div>
+                            <div class="summary-item">
+                                <span class="label">Field Score</span>
+                                <span id="fieldScore" class="value">0%</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Field Mappings -->
+                    <div class="field-mappings">
+                        <h3>Field-by-Field Comparison</h3>
+                        <div id="fieldMappingsList" class="field-mappings-list">
+                            <!-- Field mappings will be populated here -->
+                        </div>
+                    </div>
+                    
+                    <!-- Unmatched Fields -->
+                    <div class="unmatched-fields">
+                        <div class="unmatched-section">
+                            <h4>Missing Fields (In Design but Not Detected)</h4>
+                            <div id="unmatchedFigmaFields" class="unmatched-list"></div>
+                        </div>
+                        <div class="unmatched-section">
+                            <h4>Extra Fields (Detected but Not in Design)</h4>
+                            <div id="unmatchedDetectedFields" class="unmatched-list"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Field Groups -->
+                    <div class="field-groups">
+                        <h3>Field Groups</h3>
+                        <div id="fieldGroupsList" class="field-groups-list">
+                            <!-- Field groups will be populated here -->
                         </div>
                     </div>
                 </div>

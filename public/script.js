@@ -19,6 +19,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const figmaLinkInput = document.getElementById('figmaLink');
     const figmaTokenInput = document.getElementById('figmaToken');
     const fetchFigmaBtn = document.getElementById('fetchFigmaBtn');
+    const rawAnalyzeBtn = document.getElementById('rawAnalyzeBtn');
+    
+    // Field detection elements
+    const detectionImage = document.getElementById('detectionImage');
+    const detectionApiKey = document.getElementById('detectionApiKey');
+    const detectFieldsBtn = document.getElementById('detectFieldsBtn');
+    const detectionLoading = document.getElementById('detectionLoading');
+    const detectionResults = document.getElementById('detectionResults');
+    const detectionImagePreview = document.getElementById('detectionImagePreview');
     
     let currentReport = null;
     let parsedJSON = null;
@@ -27,11 +36,12 @@ document.addEventListener('DOMContentLoaded', () => {
     window.showResultTab = function(tabName) {
         const overviewTab = document.getElementById('overview-tab');
         const detailedTab = document.getElementById('detailed-tab');
+        const fieldsTab = document.getElementById('fields-tab');
         const aiAnalysisTab = document.getElementById('ai-analysis-tab');
         const tabButtons = document.querySelectorAll('.tab-button');
         
         // Remove active class from all tabs and buttons
-        [overviewTab, detailedTab, aiAnalysisTab].forEach(tab => {
+        [overviewTab, detailedTab, fieldsTab, aiAnalysisTab].forEach(tab => {
             if (tab) tab.classList.remove('active');
         });
         tabButtons.forEach(btn => btn.classList.remove('active'));
@@ -43,9 +53,12 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (tabName === 'detailed') {
             detailedTab.classList.add('active');
             tabButtons[1].classList.add('active');
+        } else if (tabName === 'fields') {
+            fieldsTab.classList.add('active');
+            tabButtons[2].classList.add('active');
         } else if (tabName === 'ai-analysis') {
             aiAnalysisTab.classList.add('active');
-            tabButtons[2].classList.add('active');
+            tabButtons[3].classList.add('active');
         }
     };
     
@@ -192,8 +205,68 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
+    // Raw Analysis button handler
+    rawAnalyzeBtn.addEventListener('click', async () => {
+        if (!parsedJSON) {
+            alert('Please enter valid Figma JSON');
+            return;
+        }
+        
+        if (!screenshotInput.files[0]) {
+            alert('Please select a screenshot');
+            return;
+        }
+        
+        const formData = new FormData();
+        formData.append('figmaJSON', JSON.stringify(parsedJSON));
+        formData.append('screenshot', screenshotInput.files[0]);
+        
+        // Show loading
+        loading.classList.remove('hidden');
+        results.classList.add('hidden');
+        const loadingMessage = loading.querySelector('p');
+        loadingMessage.textContent = 'Performing raw analysis without AI...';
+        
+        try {
+            const response = await fetch('/analyze', {
+                method: 'POST',
+                body: formData
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.message || 'Analysis failed');
+            }
+            
+            const report = await response.json();
+            currentReport = report;
+            
+            displayResults(report);
+            results.classList.remove('hidden');
+            document.getElementById('resultTabs').classList.remove('hidden');
+            
+            // Show overview tab for raw analysis
+            showResultTab('overview');
+            
+        } catch (error) {
+            alert('Error: ' + error.message);
+        } finally {
+            loading.classList.add('hidden');
+        }
+    });
+    
     function displayResults(report) {
         const accuracy = parseFloat(report.accuracy || 0);
+        
+        // Display dimension validation warning if needed
+        if (report.dimensionValidation && !report.dimensionValidation.isValid) {
+            const warningDiv = document.getElementById('dimensionWarning');
+            const warningMessage = document.getElementById('dimensionWarningMessage');
+            warningMessage.textContent = report.dimensionValidation.message;
+            warningDiv.classList.remove('hidden');
+        } else {
+            document.getElementById('dimensionWarning').classList.add('hidden');
+        }
         
         // Update score circle
         const scoreCircle = document.getElementById('scoreCircle');
@@ -244,6 +317,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (report.analysisType === 'AI_ENHANCED') {
             displayAIAnalysis(report);
         }
+        
+        // Display field analysis
+        displayFieldAnalysis(report);
     }
     
     // Display AI analysis results
@@ -1186,5 +1262,296 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Figma API error:', error);
             throw error;
         }
+    }
+    
+    // Display field analysis
+    function displayFieldAnalysis(report) {
+        // Screen type
+        if (report.screenType) {
+            document.getElementById('screenType').textContent = report.screenType.type || 'unknown';
+            document.getElementById('screenTypeConfidence').textContent = 
+                `${Math.round((report.screenType.confidence || 0) * 100)}% confidence`;
+            
+            // Display indicators
+            const indicatorsDiv = document.getElementById('screenTypeIndicators');
+            if (report.screenType.indicators && report.screenType.indicators.length > 0) {
+                indicatorsDiv.innerHTML = '<ul>' + 
+                    report.screenType.indicators.map(ind => `<li>${ind}</li>`).join('') + 
+                    '</ul>';
+            } else {
+                indicatorsDiv.innerHTML = '';
+            }
+        }
+        
+        // Field summary
+        if (report.fieldAnalysis) {
+            const fieldAnalysis = report.fieldAnalysis;
+            const fieldMapping = fieldAnalysis.fieldMapping;
+            
+            // Update summary counts
+            document.getElementById('expectedFieldCount').textContent = 
+                report.formFields?.length || '0';
+            document.getElementById('detectedFieldCount').textContent = 
+                fieldAnalysis.detectedFields?.length || '0';
+            
+            if (fieldMapping && fieldMapping.summary) {
+                document.getElementById('fieldMatchRate').textContent = 
+                    `${Math.round(fieldMapping.summary.matchRate * 100)}%`;
+                document.getElementById('fieldScore').textContent = 
+                    `${Math.round(fieldMapping.overallScore * 100)}%`;
+            }
+            
+            // Display field mappings
+            displayFieldMappings(fieldAnalysis);
+            
+            // Display unmatched fields
+            displayUnmatchedFields(fieldAnalysis);
+        } else {
+            // No field analysis available, update counts from regular data
+            document.getElementById('expectedFieldCount').textContent = 
+                report.formFields?.length || '0';
+            document.getElementById('detectedFieldCount').textContent = '0';
+        }
+        
+        // Display field groups
+        displayFieldGroups(report.fieldGroups);
+    }
+    
+    function displayFieldMappings(fieldAnalysis) {
+        const mappingsList = document.getElementById('fieldMappingsList');
+        
+        if (!fieldAnalysis.fieldComparisons || !fieldAnalysis.fieldComparisons.comparisons || 
+            fieldAnalysis.fieldComparisons.comparisons.length === 0) {
+            mappingsList.innerHTML = '<p style="color: #666;">No field mappings available.</p>';
+            return;
+        }
+        
+        const mappingsHtml = fieldAnalysis.fieldComparisons.comparisons.map(comparison => {
+            const scoreClass = comparison.comparison.matchQuality === 'excellent' ? 'score-excellent' :
+                              comparison.comparison.matchQuality === 'good' ? 'score-good' :
+                              comparison.comparison.matchQuality === 'fair' ? 'score-fair' : 'score-poor';
+            
+            const differencesHtml = comparison.differences.map(diff => `
+                <div class="diff-item">
+                    <span class="diff-property">${diff.property}:</span>
+                    <div class="diff-values">
+                        <span class="expected-value">${escapeHtml(diff.expected)}</span>
+                        <span class="diff-arrow">→</span>
+                        <span class="detected-value">${escapeHtml(diff.detected)}</span>
+                    </div>
+                </div>
+            `).join('');
+            
+            return `
+                <div class="field-mapping-item">
+                    <div class="field-mapping-header">
+                        <div class="field-info">
+                            <span class="field-type">${comparison.fieldType}</span>
+                            <span class="field-name">${escapeHtml(comparison.fieldName)}</span>
+                        </div>
+                        <div class="match-score">
+                            <span class="score-badge ${scoreClass}">
+                                ${Math.round(comparison.matchScore * 100)}% match
+                            </span>
+                        </div>
+                    </div>
+                    ${differencesHtml ? `<div class="field-differences">${differencesHtml}</div>` : ''}
+                </div>
+            `;
+        }).join('');
+        
+        mappingsList.innerHTML = mappingsHtml;
+    }
+    
+    function displayUnmatchedFields(fieldAnalysis) {
+        const unmatchedFigmaDiv = document.getElementById('unmatchedFigmaFields');
+        const unmatchedDetectedDiv = document.getElementById('unmatchedDetectedFields');
+        
+        // Unmatched Figma fields
+        if (fieldAnalysis.fieldComparisons && fieldAnalysis.fieldComparisons.unmatchedFigmaFields && 
+            fieldAnalysis.fieldComparisons.unmatchedFigmaFields.length > 0) {
+            const figmaHtml = fieldAnalysis.fieldComparisons.unmatchedFigmaFields.map(field => `
+                <div class="unmatched-item">
+                    <strong>${escapeHtml(field.name)}</strong> (${field.type})
+                </div>
+            `).join('');
+            unmatchedFigmaDiv.innerHTML = figmaHtml;
+        } else {
+            unmatchedFigmaDiv.innerHTML = '<p style="color: #27ae60;">All expected fields detected!</p>';
+        }
+        
+        // Unmatched detected fields
+        if (fieldAnalysis.fieldComparisons && fieldAnalysis.fieldComparisons.unmatchedDetectedFields && 
+            fieldAnalysis.fieldComparisons.unmatchedDetectedFields.length > 0) {
+            const detectedHtml = fieldAnalysis.fieldComparisons.unmatchedDetectedFields.map((field, index) => `
+                <div class="unmatched-item">
+                    Unexpected ${field.type || 'field'} at position (${field.bounds?.x || 0}, ${field.bounds?.y || 0})
+                </div>
+            `).join('');
+            unmatchedDetectedDiv.innerHTML = detectedHtml;
+        } else {
+            unmatchedDetectedDiv.innerHTML = '<p style="color: #27ae60;">No unexpected fields detected.</p>';
+        }
+    }
+    
+    function displayFieldGroups(fieldGroups) {
+        const groupsList = document.getElementById('fieldGroupsList');
+        
+        if (!fieldGroups || fieldGroups.length === 0) {
+            groupsList.innerHTML = '<p style="color: #666;">No field groups detected.</p>';
+            return;
+        }
+        
+        const groupsHtml = fieldGroups.map(group => `
+            <div class="field-group-item">
+                <div class="field-group-header">${escapeHtml(group.containerName)}</div>
+                <div class="field-group-fields">
+                    ${group.fields.map(field => 
+                        `<span class="field-chip">${escapeHtml(field.name)} (${field.type})</span>`
+                    ).join('')}
+                </div>
+            </div>
+        `).join('');
+        
+        groupsList.innerHTML = groupsHtml;
+    }
+    
+    // Field Detection Tool Handlers
+    
+    // Preview detection image
+    detectionImage.addEventListener('change', (e) => {
+        previewImage(e.target.files[0], detectionImagePreview);
+    });
+    
+    // Handle field detection
+    detectFieldsBtn.addEventListener('click', async () => {
+        if (!detectionImage.files[0]) {
+            alert('Please select an image');
+            return;
+        }
+        
+        const apiKey = detectionApiKey.value.trim();
+        if (!apiKey) {
+            alert('Please enter your OpenAI API key');
+            return;
+        }
+        
+        const formData = new FormData();
+        formData.append('image', detectionImage.files[0]);
+        formData.append('openaiApiKey', apiKey);
+        
+        // Show loading
+        detectionLoading.classList.remove('hidden');
+        detectionResults.classList.add('hidden');
+        detectFieldsBtn.disabled = true;
+        
+        try {
+            const response = await fetch('/detect-fields', {
+                method: 'POST',
+                body: formData
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Detection failed');
+            }
+            
+            const result = await response.json();
+            displayDetectionResults(result);
+            
+        } catch (error) {
+            alert('Detection error: ' + error.message);
+        } finally {
+            detectionLoading.classList.add('hidden');
+            detectFieldsBtn.disabled = false;
+        }
+    });
+    
+    // Display detection results
+    function displayDetectionResults(result) {
+        detectionResults.classList.remove('hidden');
+        
+        const detection = result.detection;
+        
+        // Update summary
+        document.getElementById('totalDetected').textContent = 
+            detection.detectedElements?.length || '0';
+        document.getElementById('detectedScreenType').textContent = 
+            detection.summary?.screenType || 'unknown';
+        
+        // Display elements
+        const elementsList = document.getElementById('elementsList');
+        
+        if (!detection.detectedElements || detection.detectedElements.length === 0) {
+            elementsList.innerHTML = '<p style="color: #666;">No elements detected</p>';
+        } else {
+            const elementsHtml = detection.detectedElements.map((elem, index) => {
+                const typeClass = elem.type.toLowerCase();
+                const bounds = elem.bounds || {};
+                const props = elem.properties || {};
+                const text = elem.text || {};
+                
+                // Get display text
+                let displayText = text.buttonText || text.label || text.placeholder || text.value || '';
+                if (!displayText) {
+                    displayText = `${elem.type} #${index + 1}`;
+                }
+                
+                // Build property chips
+                const propertyChips = [];
+                if (props.backgroundColor && props.backgroundColor !== 'transparent') {
+                    propertyChips.push(`<span class="property-chip" style="background: ${props.backgroundColor}; color: ${isLightColor(props.backgroundColor) ? '#000' : '#fff'};">BG: ${props.backgroundColor}</span>`);
+                }
+                if (props.borderColor && props.borderColor !== 'none') {
+                    propertyChips.push(`<span class="property-chip">Border: ${props.borderColor}</span>`);
+                }
+                if (props.borderRadius > 0) {
+                    propertyChips.push(`<span class="property-chip">Radius: ${props.borderRadius}px</span>`);
+                }
+                
+                return `
+                    <div class="element-item">
+                        <span class="element-type ${typeClass}">${elem.type}</span>
+                        <div class="element-details">
+                            <div class="element-position">
+                                Position: (${bounds.x || 0}, ${bounds.y || 0}) • Size: ${bounds.width || 0}×${bounds.height || 0}
+                            </div>
+                            <div class="element-text">${escapeHtml(displayText)}</div>
+                            ${propertyChips.length > 0 ? `<div class="element-properties">${propertyChips.join('')}</div>` : ''}
+                            ${elem.notes ? `<div style="font-size: 12px; color: #666; margin-top: 5px;">${escapeHtml(elem.notes)}</div>` : ''}
+                        </div>
+                        <div class="element-confidence">
+                            <span class="confidence-value">${Math.round((elem.confidence || 0) * 100)}%</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            elementsList.innerHTML = elementsHtml;
+        }
+        
+        // Display raw response
+        document.getElementById('rawDetectionResponse').textContent = 
+            JSON.stringify(detection, null, 2);
+    }
+    
+    // Helper function to check if color is light
+    function isLightColor(color) {
+        if (!color || color === 'transparent') return true;
+        
+        // Convert hex to RGB
+        let r, g, b;
+        if (color.startsWith('#')) {
+            const hex = color.slice(1);
+            r = parseInt(hex.slice(0, 2), 16);
+            g = parseInt(hex.slice(2, 4), 16);
+            b = parseInt(hex.slice(4, 6), 16);
+        } else {
+            return true; // Default to light for non-hex colors
+        }
+        
+        // Calculate luminance
+        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        return luminance > 0.5;
     }
 });

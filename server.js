@@ -440,8 +440,11 @@ async function analyzeWithOpenAI(screenshotPath, figmaProperties, apiKey) {
       figmaProperties.formFields.forEach((field, index) => {
         const x = field.properties?.position?.x || 0;
         const y = field.properties?.position?.y || 0;
-        console.log(`  ${index + 1}. ${field.type} "${field.name}" at (${x}, ${y})`);
+        const width = field.properties?.dimensions?.width || 0;
+        const height = field.properties?.dimensions?.height || 0;
+        console.log(`  ${index + 1}. ${field.type} "${field.name}" at (${x}, ${y}) size: ${width}×${height}`);
       });
+      console.log(`Frame dimensions: ${figmaProperties.dimensions?.width}×${figmaProperties.dimensions?.height}`);
     }
     
     const response = await openai.chat.completions.create({
@@ -556,7 +559,7 @@ This is a ${screenType.type} screen with ${formFields.length} expected form fiel
 EXPECTED FIELDS FROM FIGMA DESIGN:
 ${fieldSpecs.map((field, index) => `
 Field ${index + 1}: ${field.type.toUpperCase()} - "${field.name}"
-   - Expected Position: (${field.position.x}, ${field.position.y})
+   - Expected Position: (${field.position.x}, ${field.position.y}) pixels from top-left of the screen
    - Expected Size: ${field.dimensions.width}×${field.dimensions.height} pixels
    - Label Text: "${field.label || 'No label'}"
    - Placeholder: "${field.placeholder || 'No placeholder'}"
@@ -575,7 +578,9 @@ ANALYSIS INSTRUCTIONS:
 6. Match detected fields to expected fields based on position and type
 
 IMPORTANT:
-- Be precise with coordinates - they are measured from top-left corner
+- Coordinates must be measured from the top-left corner (0,0) of the screenshot image
+- The screenshot dimensions are ${figmaProperties.dimensions?.width || 'unknown'}×${figmaProperties.dimensions?.height || 'unknown'} pixels
+- Be EXTREMELY precise with pixel coordinates - measure to the exact top-left corner of each element
 - Report ALL fields you see, even if they don't match expected fields
 - Pay attention to subtle differences in styling (border colors, corner radius)
 - Note if fields appear disabled or have focus states

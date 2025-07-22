@@ -45,8 +45,6 @@
                                     <small>Optional: Enable AI-powered analysis with GPT-4 Vision</small>
                                 </div>
                             </div>
-                            <div class="figma-divider">OR</div>
-                            <textarea id="figmaJSON" name="figmaJSON" placeholder="Paste Figma JSON directly here..." required></textarea>
                             <div class="json-preview" id="jsonPreview"></div>
                         </div>
                         
@@ -75,6 +73,7 @@
                     <div class="input-group">
                         <label for="detectionImage">Upload Screenshot</label>
                         <input type="file" id="detectionImage" accept="image/*" />
+                        <button type="button" id="useMainScreenshotBtn" class="use-last-btn">Use Code Output Screenshot</button>
                         <div id="detectionImagePreview" class="image-preview"></div>
                     </div>
                     <div class="input-group">
@@ -326,6 +325,43 @@
                         <div class="unmatched-section">
                             <h4>Extra Fields (Detected but Not in Design)</h4>
                             <div id="unmatchedDetectedFields" class="unmatched-list"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Field Detection Comparison -->
+                    <div class="field-detection-comparison">
+                        <h3>Field Detection Accuracy</h3>
+                        <div class="accuracy-metrics">
+                            <div class="metric-grid">
+                                <div class="metric-item">
+                                    <span class="metric-label">Overall Accuracy</span>
+                                    <div class="metric-bar">
+                                        <div id="fieldOverallAccuracyBar" class="metric-fill"></div>
+                                    </div>
+                                    <span id="fieldOverallAccuracyValue" class="metric-value">0%</span>
+                                </div>
+                                <div class="metric-item">
+                                    <span class="metric-label">Position Accuracy</span>
+                                    <div class="metric-bar">
+                                        <div id="fieldPositionAccuracyBar" class="metric-fill"></div>
+                                    </div>
+                                    <span id="fieldPositionAccuracyValue" class="metric-value">0%</span>
+                                </div>
+                                <div class="metric-item">
+                                    <span class="metric-label">Type Accuracy</span>
+                                    <div class="metric-bar">
+                                        <div id="fieldTypeAccuracyBar" class="metric-fill"></div>
+                                    </div>
+                                    <span id="fieldTypeAccuracyValue" class="metric-value">0%</span>
+                                </div>
+                                <div class="metric-item">
+                                    <span class="metric-label">Dimension Accuracy</span>
+                                    <div class="metric-bar">
+                                        <div id="fieldDimensionAccuracyBar" class="metric-fill"></div>
+                                    </div>
+                                    <span id="fieldDimensionAccuracyValue" class="metric-value">0%</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     

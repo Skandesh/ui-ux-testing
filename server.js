@@ -9,6 +9,7 @@ import cors from 'cors';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import OpenAI from 'openai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -82,24 +83,49 @@ app.post('/figma/fetch', async (req, res) => {
       console.log('Available nodes:', Object.keys(data.nodes));
       
       if (node) {
-        if (node.document) {
-          return res.json({ design: node.document });
-        } else {
-          // Return the node itself if it doesn't have a document property
-          return res.json({ design: node });
-        }
+        const nodeData = node.document || node;
+        
+        // Extract properties from the node
+        console.log('Extracting properties from Figma node...');
+        const properties = extractFigmaProperties(nodeData);
+        console.log(`Extracted ${properties.formFields?.length || 0} form fields from Figma`);
+        
+        // Return both raw design and extracted properties
+        return res.json({ 
+          design: nodeData,
+          properties: properties,
+          formFields: properties.formFields || []
+        });
       }
     } else if (data.document) {
-      // Return entire document
-      return res.json({ design: data.document });
+      // Extract properties from entire document
+      console.log('Extracting properties from entire Figma document...');
+      const properties = extractFigmaProperties(data.document);
+      console.log(`Extracted ${properties.formFields?.length || 0} form fields from Figma`);
+      
+      return res.json({ 
+        design: data.document,
+        properties: properties,
+        formFields: properties.formFields || []
+      });
     }
     
     // If we have nodes but couldn't find the specific one, return the first node
     if (data.nodes && Object.keys(data.nodes).length > 0) {
       const firstNodeKey = Object.keys(data.nodes)[0];
       const firstNode = data.nodes[firstNodeKey];
+      const nodeData = firstNode.document || firstNode;
+      
       console.log('Returning first node:', firstNodeKey);
-      return res.json({ design: firstNode.document || firstNode });
+      console.log('Extracting properties from first node...');
+      const properties = extractFigmaProperties(nodeData);
+      console.log(`Extracted ${properties.formFields?.length || 0} form fields from Figma`);
+      
+      return res.json({ 
+        design: nodeData,
+        properties: properties,
+        formFields: properties.formFields || []
+      });
     }
     
     res.status(404).json({ error: 'No design data found', debug: { hasNodes: !!data.nodes, nodeCount: data.nodes ? Object.keys(data.nodes).length : 0 } });
@@ -234,6 +260,32 @@ app.post('/analyze-with-ai', upload.fields([
     // Perform AI-powered analysis on normalized screenshot
     const aiAnalysis = await analyzeWithOpenAI(normalizedScreenshotPath, figmaProperties, openaiApiKey);
     
+    // Perform automatic field comparison if we have form fields
+    let fieldComparisonResult = null;
+    if (figmaProperties.formFields && figmaProperties.formFields.length > 0 && aiAnalysis.detectedElements) {
+      console.log('Performing automatic field comparison...');
+      console.log('Figma form fields count:', figmaProperties.formFields.length);
+      console.log('AI detected elements count:', aiAnalysis.detectedElements.length);
+      
+      // Ensure the Figma data is in the right format for comparison
+      const figmaDataForComparison = {
+        properties: figmaProperties,
+        formFields: figmaProperties.formFields // Also put at root level
+      };
+      
+      fieldComparisonResult = compareFieldDetectionResults(
+        figmaDataForComparison,
+        { detectedElements: aiAnalysis.detectedElements },
+        'Figma Design',
+        'OpenAI Detection'
+      );
+      console.log(`Field comparison completed: ${fieldComparisonResult.summary.matches.total} matches found`);
+    } else {
+      console.log('Skipping field comparison:');
+      console.log('- Figma form fields:', figmaProperties.formFields?.length || 0);
+      console.log('- AI detected elements:', aiAnalysis.detectedElements?.length || 0);
+    }
+    
     // Combine both analyses
     const enhancedDetectedProperties = combineAnalyses(detectedProperties, aiAnalysis, figmaProperties);
     
@@ -263,7 +315,9 @@ app.post('/analyze-with-ai', upload.fields([
         detectedFields: enhancedDetectedProperties.detectedFields || [],
         fieldMapping: enhancedDetectedProperties.fieldMapping || null,
         fieldComparisons: comparison.fieldComparisons || null,
-        screenTypeMatch: enhancedDetectedProperties.screenType?.matchesExpected || false
+        screenTypeMatch: enhancedDetectedProperties.screenType?.matchesExpected || false,
+        // Add automatic field comparison results
+        fieldDetectionComparison: fieldComparisonResult
       },
       accuracy: comparison.accuracy,
       confidenceScore: aiAnalysis.confidence || 0.8,
@@ -845,6 +899,8 @@ function convertParsedResponse(parsed) {
       // Field detection results
       screenType: parsed.screenType || { detected: 'unknown', confidence: 0, matchesExpected: false },
       detectedFields: parsed.detectedFields || [],
+      // Add detectedElements for field comparison compatibility
+      detectedElements: parsed.detectedFields || [],
       fieldMatching: parsed.fieldMatching || {
         totalExpected: 0,
         totalDetected: 0,
@@ -1993,6 +2049,415 @@ function mapFieldsToDetected(figmaFields, detectedFields, screenDimensions) {
       matchRate: figmaFields.length > 0 ? (mappings.length / figmaFields.length) : 0
     }
   };
+}
+
+// Extract field elements from a comprehensive JSON response
+function extractFieldElementsFromJSON(jsonData) {
+  // Check if it's a field detection response
+  if (jsonData.detectedElements && Array.isArray(jsonData.detectedElements)) {
+    return jsonData.detectedElements;
+  }
+  
+  // Check if it's an analysis response with detected fields
+  if (jsonData.detectedFields && Array.isArray(jsonData.detectedFields)) {
+    return jsonData.detectedFields;
+  }
+  
+  // Check for nested field detection results
+  if (jsonData.fieldAnalysis?.detectedElements) {
+    return jsonData.fieldAnalysis.detectedElements;
+  }
+  
+  // Look for form fields in properties
+  if (jsonData.properties?.formFields && jsonData.properties.formFields.length > 0) {
+    console.log(`extractFieldElementsFromJSON: Found ${jsonData.properties.formFields.length} form fields in properties`);
+    // Convert form fields to detected elements format
+    return jsonData.properties.formFields.map(field => ({
+      type: field.type,
+      bounds: {
+        x: field.properties?.position?.x || 0,
+        y: field.properties?.position?.y || 0,
+        width: field.properties?.dimensions?.width || 0,
+        height: field.properties?.dimensions?.height || 0
+      },
+      properties: {
+        backgroundColor: field.properties?.styling?.backgroundColor,
+        borderColor: field.properties?.styling?.borderColor,
+        borderRadius: field.properties?.styling?.borderRadius,
+        borderWidth: field.properties?.styling?.borderWidth,
+        hasShadow: field.properties?.styling?.hasShadow
+      },
+      text: {
+        label: field.label,
+        placeholder: field.placeholder,
+        value: field.value,
+        buttonText: field.type === 'button' ? field.name : undefined
+      },
+      state: {
+        isEnabled: true,
+        hasFocus: false,
+        isChecked: field.type === 'checkbox' ? false : undefined
+      },
+      confidence: 1.0,
+      name: field.name,
+      properties: field.properties
+    }));
+  }
+  
+  // Also check if formFields is at the root level
+  if (jsonData.formFields && Array.isArray(jsonData.formFields) && jsonData.formFields.length > 0) {
+    console.log(`extractFieldElementsFromJSON: Found ${jsonData.formFields.length} form fields at root level`);
+    return jsonData.formFields.map(field => ({
+      type: field.type || 'input',
+      bounds: {
+        x: field.properties?.position?.x || field.x || 0,
+        y: field.properties?.position?.y || field.y || 0,
+        width: field.properties?.dimensions?.width || field.width || 100,
+        height: field.properties?.dimensions?.height || field.height || 40
+      },
+      properties: field.properties?.styling || field.style || {},
+      text: {
+        label: field.label || field.name || '',
+        placeholder: field.placeholder || '',
+        value: field.value || '',
+        buttonText: field.type === 'button' ? field.name : undefined
+      },
+      name: field.name || field.label || 'Unknown Field',
+      properties: field.properties
+    }));
+  }
+  
+  return [];
+}
+
+// Compare field detection results between two sources
+function compareFieldDetectionResults(source1Data, source2Data, source1Name = 'Source 1', source2Name = 'Source 2') {
+  console.log('\n=== Field Comparison Debug ===');
+  console.log('Source1 data type:', typeof source1Data);
+  console.log('Source1 keys:', source1Data ? Object.keys(source1Data).slice(0, 10) : 'null');
+  console.log('Source2 data type:', typeof source2Data);
+  console.log('Source2 keys:', source2Data ? Object.keys(source2Data).slice(0, 10) : 'null');
+  
+  // Extract field elements from both sources
+  const fields1 = extractFieldElementsFromJSON(source1Data);
+  const fields2 = extractFieldElementsFromJSON(source2Data);
+  
+  console.log(`Comparing fields - ${source1Name}: ${fields1.length} fields, ${source2Name}: ${fields2.length} fields`);
+  
+  if (fields1.length === 0) {
+    console.log('No fields extracted from source1. Checking structure...');
+    console.log('source1Data.properties exists?', !!source1Data.properties);
+    console.log('source1Data.properties.formFields exists?', !!source1Data.properties?.formFields);
+    console.log('source1Data.formFields exists?', !!source1Data.formFields);
+  }
+  
+  const comparison = {
+    summary: {
+      source1: {
+        name: source1Name,
+        totalFields: fields1.length,
+        fieldTypes: {}
+      },
+      source2: {
+        name: source2Name,
+        totalFields: fields2.length,
+        fieldTypes: {}
+      },
+      matches: {
+        total: 0,
+        byType: {},
+        averageAccuracy: 0
+      }
+    },
+    fieldMatches: [],
+    unmatchedSource1: [],
+    unmatchedSource2: [],
+    accuracyMetrics: {
+      positionAccuracy: 0,
+      dimensionAccuracy: 0,
+      styleAccuracy: 0,
+      typeAccuracy: 0,
+      overallAccuracy: 0
+    }
+  };
+  
+  // Count field types
+  fields1.forEach(field => {
+    comparison.summary.source1.fieldTypes[field.type] = (comparison.summary.source1.fieldTypes[field.type] || 0) + 1;
+  });
+  
+  fields2.forEach(field => {
+    comparison.summary.source2.fieldTypes[field.type] = (comparison.summary.source2.fieldTypes[field.type] || 0) + 1;
+  });
+  
+  // Match fields between sources
+  const usedIndices2 = new Set();
+  const matchScores = [];
+  
+  fields1.forEach((field1, idx1) => {
+    let bestMatch = null;
+    let bestScore = 0;
+    let bestIdx2 = -1;
+    
+    fields2.forEach((field2, idx2) => {
+      if (usedIndices2.has(idx2)) return;
+      
+      // Calculate match score
+      let score = 0;
+      const scoreBreakdown = {};
+      
+      // Type matching (30% weight)
+      if (field1.type === field2.type) {
+        score += 0.3;
+        scoreBreakdown.type = 1.0;
+      } else {
+        scoreBreakdown.type = 0.0;
+      }
+      
+      // Position matching (30% weight)
+      if (field1.bounds && field2.bounds) {
+        const xDiff = Math.abs((field1.bounds.x || 0) - (field2.bounds.x || 0));
+        const yDiff = Math.abs((field1.bounds.y || 0) - (field2.bounds.y || 0));
+        const positionScore = Math.max(0, 1 - (xDiff + yDiff) / 200);
+        score += positionScore * 0.3;
+        scoreBreakdown.position = positionScore;
+      }
+      
+      // Dimension matching (20% weight)
+      if (field1.bounds && field2.bounds) {
+        const widthDiff = Math.abs((field1.bounds.width || 0) - (field2.bounds.width || 0));
+        const heightDiff = Math.abs((field1.bounds.height || 0) - (field2.bounds.height || 0));
+        const dimensionScore = Math.max(0, 1 - (widthDiff + heightDiff) / 200);
+        score += dimensionScore * 0.2;
+        scoreBreakdown.dimension = dimensionScore;
+      }
+      
+      // Style matching (10% weight)
+      let styleScore = 0;
+      let styleChecks = 0;
+      
+      if (field1.properties && field2.properties) {
+        // Background color
+        if (field1.properties.backgroundColor && field2.properties.backgroundColor) {
+          styleChecks++;
+          if (field1.properties.backgroundColor === field2.properties.backgroundColor) {
+            styleScore++;
+          }
+        }
+        
+        // Border
+        if (field1.properties.borderColor !== undefined && field2.properties.borderColor !== undefined) {
+          styleChecks++;
+          if (field1.properties.borderColor === field2.properties.borderColor) {
+            styleScore++;
+          }
+        }
+        
+        // Border radius
+        if (field1.properties.borderRadius !== undefined && field2.properties.borderRadius !== undefined) {
+          styleChecks++;
+          if (Math.abs(field1.properties.borderRadius - field2.properties.borderRadius) < 3) {
+            styleScore++;
+          }
+        }
+      }
+      
+      if (styleChecks > 0) {
+        const styleRatio = styleScore / styleChecks;
+        score += styleRatio * 0.1;
+        scoreBreakdown.style = styleRatio;
+      }
+      
+      // Text matching (10% weight)
+      let textScore = 0;
+      let textChecks = 0;
+      
+      if (field1.text && field2.text) {
+        // Check button text
+        if (field1.text.buttonText && field2.text.buttonText) {
+          textChecks++;
+          if (field1.text.buttonText.toLowerCase() === field2.text.buttonText.toLowerCase()) {
+            textScore++;
+          }
+        }
+        
+        // Check placeholder
+        if (field1.text.placeholder && field2.text.placeholder) {
+          textChecks++;
+          if (field1.text.placeholder.toLowerCase() === field2.text.placeholder.toLowerCase()) {
+            textScore++;
+          }
+        }
+        
+        // Check label
+        if (field1.text.label && field2.text.label) {
+          textChecks++;
+          if (field1.text.label.toLowerCase() === field2.text.label.toLowerCase()) {
+            textScore++;
+          }
+        }
+      }
+      
+      if (textChecks > 0) {
+        const textRatio = textScore / textChecks;
+        score += textRatio * 0.1;
+        scoreBreakdown.text = textRatio;
+      }
+      
+      if (score > bestScore && score > 0.3) {
+        bestScore = score;
+        bestMatch = {
+          field1: field1,
+          field2: field2,
+          score: score,
+          scoreBreakdown: scoreBreakdown
+        };
+        bestIdx2 = idx2;
+      }
+    });
+    
+    if (bestMatch) {
+      usedIndices2.add(bestIdx2);
+      comparison.fieldMatches.push({
+        source1Field: bestMatch.field1,
+        source2Field: bestMatch.field2,
+        matchScore: bestMatch.score,
+        scoreBreakdown: bestMatch.scoreBreakdown,
+        differences: calculateFieldDifferences(bestMatch.field1, bestMatch.field2)
+      });
+      
+      // Track match scores for accuracy calculation
+      matchScores.push(bestMatch.scoreBreakdown);
+      
+      // Update match count by type
+      const fieldType = bestMatch.field1.type;
+      comparison.summary.matches.byType[fieldType] = (comparison.summary.matches.byType[fieldType] || 0) + 1;
+    } else {
+      comparison.unmatchedSource1.push(field1);
+    }
+  });
+  
+  // Find unmatched fields from source 2
+  fields2.forEach((field2, idx2) => {
+    if (!usedIndices2.has(idx2)) {
+      comparison.unmatchedSource2.push(field2);
+    }
+  });
+  
+  // Calculate accuracy metrics
+  if (matchScores.length > 0) {
+    comparison.accuracyMetrics.positionAccuracy = 
+      matchScores.reduce((sum, s) => sum + (s.position || 0), 0) / matchScores.length;
+    comparison.accuracyMetrics.dimensionAccuracy = 
+      matchScores.reduce((sum, s) => sum + (s.dimension || 0), 0) / matchScores.length;
+    comparison.accuracyMetrics.styleAccuracy = 
+      matchScores.reduce((sum, s) => sum + (s.style || 0), 0) / matchScores.length;
+    comparison.accuracyMetrics.typeAccuracy = 
+      matchScores.reduce((sum, s) => sum + (s.type || 0), 0) / matchScores.length;
+    
+    comparison.accuracyMetrics.overallAccuracy = 
+      (comparison.accuracyMetrics.positionAccuracy * 0.3 +
+       comparison.accuracyMetrics.dimensionAccuracy * 0.2 +
+       comparison.accuracyMetrics.styleAccuracy * 0.1 +
+       comparison.accuracyMetrics.typeAccuracy * 0.3 +
+       (matchScores.reduce((sum, s) => sum + (s.text || 0), 0) / matchScores.length) * 0.1);
+  }
+  
+  comparison.summary.matches.total = comparison.fieldMatches.length;
+  comparison.summary.matches.averageAccuracy = comparison.accuracyMetrics.overallAccuracy;
+  
+  return comparison;
+}
+
+// Calculate specific differences between two fields
+function calculateFieldDifferences(field1, field2) {
+  const differences = [];
+  
+  // Position differences
+  if (field1.bounds && field2.bounds) {
+    const xDiff = Math.abs((field1.bounds.x || 0) - (field2.bounds.x || 0));
+    const yDiff = Math.abs((field1.bounds.y || 0) - (field2.bounds.y || 0));
+    
+    if (xDiff > 0 || yDiff > 0) {
+      differences.push({
+        property: 'position',
+        source1: `(${field1.bounds.x}, ${field1.bounds.y})`,
+        source2: `(${field2.bounds.x}, ${field2.bounds.y})`,
+        difference: `${xDiff}px horizontal, ${yDiff}px vertical`
+      });
+    }
+    
+    // Dimension differences
+    const widthDiff = Math.abs((field1.bounds.width || 0) - (field2.bounds.width || 0));
+    const heightDiff = Math.abs((field1.bounds.height || 0) - (field2.bounds.height || 0));
+    
+    if (widthDiff > 0 || heightDiff > 0) {
+      differences.push({
+        property: 'dimensions',
+        source1: `${field1.bounds.width}x${field1.bounds.height}`,
+        source2: `${field2.bounds.width}x${field2.bounds.height}`,
+        difference: `${widthDiff}px width, ${heightDiff}px height`
+      });
+    }
+  }
+  
+  // Style differences
+  if (field1.properties && field2.properties) {
+    if (field1.properties.backgroundColor !== field2.properties.backgroundColor) {
+      differences.push({
+        property: 'backgroundColor',
+        source1: field1.properties.backgroundColor || 'none',
+        source2: field2.properties.backgroundColor || 'none'
+      });
+    }
+    
+    if (field1.properties.borderColor !== field2.properties.borderColor) {
+      differences.push({
+        property: 'borderColor',
+        source1: field1.properties.borderColor || 'none',
+        source2: field2.properties.borderColor || 'none'
+      });
+    }
+    
+    const radiusDiff = Math.abs((field1.properties.borderRadius || 0) - (field2.properties.borderRadius || 0));
+    if (radiusDiff > 0) {
+      differences.push({
+        property: 'borderRadius',
+        source1: `${field1.properties.borderRadius}px`,
+        source2: `${field2.properties.borderRadius}px`,
+        difference: `${radiusDiff}px`
+      });
+    }
+  }
+  
+  // Text differences
+  if (field1.text && field2.text) {
+    if (field1.text.buttonText !== field2.text.buttonText) {
+      differences.push({
+        property: 'buttonText',
+        source1: field1.text.buttonText || 'none',
+        source2: field2.text.buttonText || 'none'
+      });
+    }
+    
+    if (field1.text.placeholder !== field2.text.placeholder) {
+      differences.push({
+        property: 'placeholder',
+        source1: field1.text.placeholder || 'none',
+        source2: field2.text.placeholder || 'none'
+      });
+    }
+    
+    if (field1.text.label !== field2.text.label) {
+      differences.push({
+        property: 'label',
+        source1: field1.text.label || 'none',
+        source2: field2.text.label || 'none'
+      });
+    }
+  }
+  
+  return differences;
 }
 
 // Detect screen type based on form fields and content patterns
@@ -3727,6 +4192,52 @@ async function resizeImage(imagePath, width, height) {
 // Serve uploaded files
 app.use('/uploads', express.static(uploadsDir));
 
+// Helper function to estimate bounds based on position description
+function estimateBounds(element, imageMetadata) {
+  const { width, height } = imageMetadata;
+  
+  // Default sizes based on element type
+  const defaultSizes = {
+    input: { width: 250, height: 40 },
+    button: { width: 120, height: 40 },
+    checkbox: { width: 20, height: 20 },
+    radio: { width: 20, height: 20 },
+    select: { width: 200, height: 40 },
+    textarea: { width: 300, height: 100 },
+    link: { width: 100, height: 30 }
+  };
+  
+  const size = defaultSizes[element.type] || { width: 150, height: 40 };
+  
+  // Try to parse position from notes or use center as default
+  let x = width / 2 - size.width / 2;
+  let y = height / 2 - size.height / 2;
+  
+  // Check if position info is in notes or other fields
+  const positionText = (element.notes || '').toLowerCase();
+  
+  if (positionText.includes('top') || positionText.includes('header')) {
+    y = 50;
+  } else if (positionText.includes('bottom') || positionText.includes('footer')) {
+    y = height - size.height - 50;
+  }
+  
+  if (positionText.includes('left')) {
+    x = 50;
+  } else if (positionText.includes('right')) {
+    x = width - size.width - 50;
+  } else if (positionText.includes('center')) {
+    x = width / 2 - size.width / 2;
+  }
+  
+  return {
+    x: Math.round(x),
+    y: Math.round(y),
+    width: size.width,
+    height: size.height
+  };
+}
+
 // Standalone OpenAI field detection endpoint
 app.post('/detect-fields', upload.single('image'), async (req, res) => {
   try {
@@ -3751,21 +4262,27 @@ app.post('/detect-fields', upload.single('image'), async (req, res) => {
     const metadata = await sharp(imagePath).metadata();
     console.log(`Image dimensions: ${metadata.width}x${metadata.height}`);
     
-    const prompt = `Analyze this UI screenshot and detect ALL form fields and interactive elements.
+    const prompt = `Analyze this UI screenshot and identify ALL interactive elements like form fields, buttons, and links.
 
-TASK: Identify every form field, button, and interactive element in the image.
+IMPORTANT: Focus on detecting elements accurately rather than precise coordinates. The image is ${metadata.width}x${metadata.height} pixels.
 
-For each element found, provide:
-1. Type (input, button, checkbox, radio, select, textarea, link, etc.)
-2. Position (x, y coordinates from top-left corner)
-3. Size (width and height in pixels)
-4. Visual properties (background color, border color, border radius)
-5. Any visible text (labels, placeholders, button text)
-6. State (enabled/disabled, focused, etc.)
+For each interactive element you see:
+1. Identify the TYPE (input field, button, checkbox, dropdown, link, etc.)
+2. Note its APPROXIMATE LOCATION (you can describe as "top-left", "center", "bottom-right" or give rough coordinates)
+3. Capture any VISIBLE TEXT (labels, placeholders, button text)
+4. Describe its VISUAL STYLE (colors, borders, if it looks disabled/enabled)
 
-Be EXTREMELY precise with coordinates. Measure from the top-left corner of each element.
+Common elements to look for:
+- Text input fields (username, password, email, search boxes)
+- Buttons (submit, login, register, action buttons)
+- Checkboxes and radio buttons
+- Dropdown/select menus
+- Links and navigation items
+- Text areas for longer input
+- Toggle switches
+- File upload areas
 
-Return a JSON object with this structure:
+Return ONLY a JSON object with this exact structure:
 {
   "imageInfo": {
     "width": ${metadata.width},
@@ -3818,11 +4335,11 @@ Return a JSON object with this structure:
     console.log('Sending image to OpenAI for field detection...');
     
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: "You are an expert UI element detector. You analyze screenshots and identify ALL interactive elements with precise pixel-perfect accuracy. You MUST respond with ONLY a JSON object - no other text."
+          content: "You are an expert UI/UX analyst who identifies interactive elements in screenshots. You have excellent vision and can spot all buttons, form fields, and clickable elements. Always respond with ONLY valid JSON - no markdown, no explanations, just the JSON object."
         },
         {
           role: "user",
@@ -3842,7 +4359,7 @@ Return a JSON object with this structure:
         }
       ],
       max_tokens: 4000,
-      temperature: 0.1
+      temperature: 0.2
     });
     
     const aiResponse = response.choices[0].message.content;
@@ -3862,11 +4379,31 @@ Return a JSON object with this structure:
       }
     }
     
-    // Log summary
-    if (detectionResult.detectedElements) {
+    // Validate and normalize bounds
+    if (detectionResult.detectedElements && Array.isArray(detectionResult.detectedElements)) {
       console.log(`Detected ${detectionResult.detectedElements.length} elements`);
-      detectionResult.detectedElements.forEach((elem, index) => {
+      
+      // Process each element to ensure valid bounds
+      detectionResult.detectedElements = detectionResult.detectedElements.map((elem, index) => {
+        // If bounds are missing or invalid, estimate based on position description
+        if (!elem.bounds || typeof elem.bounds.x !== 'number') {
+          console.log(`Element ${index + 1} (${elem.type}) has invalid bounds, estimating...`);
+          
+          // Try to estimate bounds based on position description or set defaults
+          const estimatedBounds = estimateBounds(elem, metadata);
+          elem.bounds = estimatedBounds;
+        }
+        
+        // Ensure bounds are within image dimensions
+        if (elem.bounds) {
+          elem.bounds.x = Math.max(0, Math.min(elem.bounds.x, metadata.width - 10));
+          elem.bounds.y = Math.max(0, Math.min(elem.bounds.y, metadata.height - 10));
+          elem.bounds.width = Math.min(elem.bounds.width || 100, metadata.width - elem.bounds.x);
+          elem.bounds.height = Math.min(elem.bounds.height || 40, metadata.height - elem.bounds.y);
+        }
+        
         console.log(`  ${index + 1}. ${elem.type} at (${elem.bounds?.x}, ${elem.bounds?.y})`);
+        return elem;
       });
     }
     
@@ -3885,6 +4422,152 @@ Return a JSON object with this structure:
     });
   }
 });
+
+// Gemini field detection endpoint
+app.post('/detect-fields-gemini', upload.single('image'), async (req, res) => {
+  try {
+    const imagePath = req.file.path;
+    const geminiApiKey = req.body.geminiApiKey;
+    
+    if (!geminiApiKey) {
+      return res.status(400).json({ 
+        error: 'Gemini API key is required' 
+      });
+    }
+    
+    console.log('Starting Gemini field detection...');
+    
+    const genAI = new GoogleGenerativeAI(geminiApiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    
+    // Read image and get metadata
+    const imageBuffer = fs.readFileSync(imagePath);
+    const metadata = await sharp(imagePath).metadata();
+    console.log(`Image dimensions: ${metadata.width}x${metadata.height}`);
+    
+    const prompt = `Analyze this UI screenshot and detect ALL form fields and interactive elements.
+
+TASK: Identify every form field, button, and interactive element in the image.
+
+For each element found, provide:
+1. Type (input, button, checkbox, radio, select, textarea, link, etc.)
+2. Position (x, y coordinates from top-left corner)
+3. Size (width and height in pixels)
+4. Visual properties (background color, border color, border radius)
+5. Any visible text (labels, placeholders, button text)
+6. State (enabled/disabled, focused, etc.)
+
+Be EXTREMELY precise with coordinates. Measure from the top-left corner (0,0) of the image.
+The image dimensions are ${metadata.width}x${metadata.height} pixels.
+
+Return a JSON object with this structure:
+{
+  "imageInfo": {
+    "width": ${metadata.width},
+    "height": ${metadata.height}
+  },
+  "detectedElements": [
+    {
+      "type": "input|button|checkbox|radio|select|textarea|link|other",
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "properties": {
+        "backgroundColor": "#hexcode or transparent",
+        "borderColor": "#hexcode or none",
+        "borderRadius": 0,
+        "borderWidth": 0,
+        "hasShadow": true|false
+      },
+      "text": {
+        "label": "any label text near the field",
+        "placeholder": "placeholder text if visible",
+        "value": "current value if any",
+        "buttonText": "text on buttons"
+      },
+      "state": {
+        "isEnabled": true|false,
+        "hasFocus": true|false,
+        "isChecked": true|false
+      },
+      "confidence": 0.0-1.0,
+      "notes": "any additional observations"
+    }
+  ],
+  "summary": {
+    "totalElements": 0,
+    "elementsByType": {
+      "input": 0,
+      "button": 0,
+      "checkbox": 0,
+      "other": 0
+    },
+    "screenType": "login|register|form|dashboard|other",
+    "observations": "general observations about the UI"
+  }
+}
+
+IMPORTANT: Return ONLY the JSON object, no other text or markdown.`;
+    
+    console.log('Sending image to Gemini for analysis...');
+    
+    // Prepare image for Gemini
+    const imagePart = {
+      inlineData: {
+        data: imageBuffer.toString('base64'),
+        mimeType: metadata.format === 'png' ? 'image/png' : 'image/jpeg'
+      }
+    };
+    
+    const result = await model.generateContent([prompt, imagePart]);
+    const response = await result.response;
+    const text = response.text();
+    
+    console.log('Gemini response received');
+    
+    // Parse response
+    let detectionResult;
+    try {
+      // Clean up the response if needed
+      const cleanedText = text.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+      detectionResult = JSON.parse(cleanedText);
+    } catch (e) {
+      // Try to extract JSON from response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        detectionResult = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error('Invalid JSON response from Gemini');
+      }
+    }
+    
+    // Log summary
+    if (detectionResult.detectedElements) {
+      console.log(`Gemini detected ${detectionResult.detectedElements.length} elements`);
+      detectionResult.detectedElements.forEach((elem, index) => {
+        console.log(`  ${index + 1}. ${elem.type} at (${elem.bounds?.x}, ${elem.bounds?.y})`);
+      });
+    }
+    
+    res.json({
+      success: true,
+      imagePath: `/uploads/${path.basename(imagePath)}`,
+      detection: detectionResult,
+      rawResponse: text
+    });
+    
+  } catch (error) {
+    console.error('Gemini field detection error:', error);
+    res.status(500).json({ 
+      error: 'Gemini field detection failed', 
+      message: error.message 
+    });
+  }
+});
+
 app.use('/reports', express.static(reportsDir));
 
 // Get report endpoint
@@ -3895,6 +4578,50 @@ app.get('/report/:id', (req, res) => {
     res.json(report);
   } else {
     res.status(404).json({ error: 'Report not found' });
+  }
+});
+
+// Compare field detection results endpoint
+app.post('/compare-fields', express.json(), async (req, res) => {
+  try {
+    const { source1, source2, source1Name, source2Name } = req.body;
+    
+    if (!source1 || !source2) {
+      return res.status(400).json({ 
+        error: 'Both source1 and source2 JSON data are required' 
+      });
+    }
+    
+    console.log('Starting field comparison...');
+    console.log(`Source 1 (${source1Name || 'Source 1'}):`, typeof source1);
+    console.log(`Source 2 (${source2Name || 'Source 2'}):`, typeof source2);
+    
+    // Perform field comparison
+    const comparisonResult = compareFieldDetectionResults(
+      source1, 
+      source2, 
+      source1Name || 'Source 1', 
+      source2Name || 'Source 2'
+    );
+    
+    // Log summary
+    console.log('Comparison Summary:');
+    console.log(`- Total matches: ${comparisonResult.summary.matches.total}`);
+    console.log(`- Overall accuracy: ${(comparisonResult.accuracyMetrics.overallAccuracy * 100).toFixed(1)}%`);
+    console.log(`- Position accuracy: ${(comparisonResult.accuracyMetrics.positionAccuracy * 100).toFixed(1)}%`);
+    console.log(`- Type accuracy: ${(comparisonResult.accuracyMetrics.typeAccuracy * 100).toFixed(1)}%`);
+    
+    res.json({
+      success: true,
+      comparison: comparisonResult
+    });
+    
+  } catch (error) {
+    console.error('Field comparison error:', error);
+    res.status(500).json({ 
+      error: 'Field comparison failed', 
+      message: error.message 
+    });
   }
 });
 

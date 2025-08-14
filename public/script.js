@@ -121,10 +121,14 @@ document.addEventListener('DOMContentLoaded', () => {
       showStatus('Connecting to Figma API...', 'info');
 
       try {
+        // Get checkbox value for header auth
+        const useHeaderAuth = document.getElementById('useHeaderAuth').checked;
+        
         const response = await fetchFigmaDesign(
           figmaData.fileKey,
           figmaData.nodeId,
-          figmaToken
+          figmaToken,
+          useHeaderAuth
         );
         if (response) {
           // Handle new response structure
@@ -1712,18 +1716,29 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Fetch Figma design using API (via server proxy)
-    async function fetchFigmaDesign(fileKey, nodeId, token) {
+    async function fetchFigmaDesign(fileKey, nodeId, token, useHeaderAuth = false) {
       try {
+        const headers = {
+          'Content-Type': 'application/json',
+        };
+        
+        const body = {
+          fileKey: fileKey,
+          nodeId: nodeId,
+          useHeaderAuth: useHeaderAuth
+        };
+        
+        // Add token to appropriate location based on checkbox
+        if (useHeaderAuth) {
+          headers['X-Figma-Token'] = token;
+        } else {
+          body.token = token;
+        }
+        
         const response = await fetch('/figma/fetch', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            fileKey: fileKey,
-            nodeId: nodeId,
-            token: token,
-          }),
+          headers: headers,
+          body: JSON.stringify(body),
         });
 
         if (!response.ok) {
@@ -2331,25 +2346,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Helper function to check if color is light
-    function isLightColor(color) {
-      if (!color || color === 'transparent') return true;
-
-      // Convert hex to RGB
-      let r, g, b;
-      if (color.startsWith('#')) {
-        const hex = color.slice(1);
-        r = parseInt(hex.slice(0, 2), 16);
-        g = parseInt(hex.slice(2, 4), 16);
-        b = parseInt(hex.slice(4, 6), 16);
-      } else {
-        return true; // Default to light for non-hex colors
-      }
-
-      // Calculate luminance
-      const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-      return luminance > 0.5;
-    }
-
     // Store last detection results for comparison
     let lastOpenAIDetection = null;
 
@@ -2566,4 +2562,210 @@ document.addEventListener('DOMContentLoaded', () => {
       lastOpenAIDetection = result.detection;
     };
   }
+  
+  // Element Comparison functionality
+  const elementCompareBtn = document.getElementById('elementCompareBtn');
+  if (elementCompareBtn) {
+    elementCompareBtn.addEventListener('click', async () => {
+      if (!fetchedFigmaJSON) {
+        alert('Please fetch a Figma design first using the Fetch Design button');
+        return;
+      }
+      
+      const screenshotInput = document.getElementById('codeScreenshot');
+      if (!screenshotInput.files[0]) {
+        alert('Please select a code output screenshot');
+        return;
+      }
+      
+      const formData = new FormData();
+      formData.append('figmaJSON', JSON.stringify(fetchedFigmaJSON));
+      formData.append('screenshot', screenshotInput.files[0]);
+      
+      // Show loading
+      const loading = document.getElementById('loading');
+      const results = document.getElementById('results');
+      if (loading) {
+        loading.classList.remove('hidden');
+        results.classList.add('hidden');
+        const loadingMessage = loading.querySelector('p');
+        if (loadingMessage) {
+          loadingMessage.textContent = 'Performing OCR and element comparison...';
+        }
+      }
+      
+      try {
+        const response = await fetch('/api/compare-elements', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Element comparison failed');
+        }
+        
+        const elementReport = await response.json();
+        displayElementComparison(elementReport);
+        
+        // Show results and switch to element comparison tab
+        if (loading) loading.classList.add('hidden');
+        if (results) results.classList.remove('hidden');
+        
+        const resultTabs = document.getElementById('resultTabs');
+        if (resultTabs) resultTabs.classList.remove('hidden');
+        
+        showResultTab('element-comparison');
+        
+      } catch (error) {
+        alert('Error: ' + error.message);
+      } finally {
+        if (loading) loading.classList.add('hidden');
+      }
+    });
+  }
 });
+
+// Display element comparison results
+function displayElementComparison(report) {
+  if (!report || !report.summary) return;
+  
+  // Update summary cards
+  setTextContent('totalElementsCount', report.summary.totalElements || 0);
+  setTextContent('matchedElementsCount', report.summary.matchedElements || 0);
+  setTextContent('matchingCount', report.summary.matchingElements || 0);
+  setTextContent('notMatchingCount', report.summary.notMatchingElements || 0);
+  setTextContent('elementAccuracy', report.summary.overallAccuracy || '0%');
+  
+  // Populate comparison table
+  const tbody = document.getElementById('elementComparisonBody');
+  if (tbody && report.comparisonTable) {
+    tbody.innerHTML = '';
+    
+    report.comparisonTable.forEach(item => {
+      const row = document.createElement('tr');
+      row.className = item.overallMatch === 'MATCHING' ? 'matching-row' : 'not-matching-row';
+      row.dataset.issues = item.issues ? item.issues.join(',') : '';
+      
+      // Helper to create color cell
+      const createColorCell = (color) => {
+        if (!color || color === 'transparent' || color === 'Not specified') {
+          return `<td>${color || 'N/A'}</td>`;
+        }
+        return `<td><span class="color-chip" style="background: ${color}"></span> ${color}</td>`;
+      };
+      
+      // Helper to create match status cell
+      const createStatusCell = (status) => {
+        let icon = '';
+        let className = '';
+        if (status === 'MATCHING') {
+          icon = '✅';
+          className = 'status-matching';
+        } else if (status === 'NOT MATCHING') {
+          icon = '❌';
+          className = 'status-not-matching';
+        } else {
+          icon = '⚠️';
+          className = 'status-unknown';
+        }
+        return `<td class="${className}">${icon} ${status}</td>`;
+      };
+      
+      row.innerHTML = `
+        <td>${escapeHtml(item.element)}</td>
+        <td><span class="match-type-badge ${item.matchType?.toLowerCase()}">${item.matchType || 'N/A'}</span></td>
+        ${createColorCell(item.figmaProperties.textColor)}
+        ${createColorCell(item.screenshotProperties.textColor)}
+        ${createStatusCell(item.comparison.textColor)}
+        ${createColorCell(item.figmaProperties.backgroundColor)}
+        ${createColorCell(item.screenshotProperties.backgroundColor)}
+        ${createStatusCell(item.comparison.backgroundColor)}
+        <td>${item.figmaProperties.fontSize || 'N/A'}px / ${item.screenshotProperties.fontSize || 'N/A'}px</td>
+        ${createStatusCell(item.overallMatch)}
+        <td>${item.issues ? item.issues.join(', ') : 'None'}</td>
+      `;
+      
+      tbody.appendChild(row);
+    });
+  }
+  
+  // Display unmatched elements
+  const unmatchedFigmaList = document.getElementById('unmatchedFigmaList');
+  if (unmatchedFigmaList && report.unmatchedFigmaElements) {
+    unmatchedFigmaList.innerHTML = '';
+    if (report.unmatchedFigmaElements.length > 0) {
+      report.unmatchedFigmaElements.forEach(el => {
+        const div = document.createElement('div');
+        div.className = 'unmatched-item';
+        div.innerHTML = `
+          <strong>${escapeHtml(el.text)}</strong>
+          <span class="unmatched-details">Color: ${el.color || 'N/A'}, Size: ${el.fontSize || 'N/A'}px</span>
+          <span class="unmatched-reason">${el.reason}</span>
+        `;
+        unmatchedFigmaList.appendChild(div);
+      });
+    } else {
+      unmatchedFigmaList.innerHTML = '<p class="no-items">All Figma elements matched!</p>';
+    }
+  }
+  
+  const unmatchedScreenshotList = document.getElementById('unmatchedScreenshotList');
+  if (unmatchedScreenshotList && report.unmatchedScreenshotElements) {
+    unmatchedScreenshotList.innerHTML = '';
+    if (report.unmatchedScreenshotElements.length > 0) {
+      report.unmatchedScreenshotElements.forEach(el => {
+        const div = document.createElement('div');
+        div.className = 'unmatched-item';
+        div.innerHTML = `
+          <strong>${escapeHtml(el.text)}</strong>
+          <span class="unmatched-reason">${el.reason}</span>
+        `;
+        unmatchedScreenshotList.appendChild(div);
+      });
+    } else {
+      unmatchedScreenshotList.innerHTML = '<p class="no-items">All screenshot elements matched!</p>';
+    }
+  }
+}
+
+// Filter elements in the comparison table
+function filterElements(filterType) {
+  const tbody = document.getElementById('elementComparisonBody');
+  if (!tbody) return;
+  
+  const rows = tbody.querySelectorAll('tr');
+  const filterBtns = document.querySelectorAll('.filter-btn');
+  
+  // Update active button
+  filterBtns.forEach(btn => {
+    btn.classList.remove('active');
+    if (btn.getAttribute('onclick').includes(`'${filterType}'`)) {
+      btn.classList.add('active');
+    }
+  });
+  
+  // Apply filter
+  rows.forEach(row => {
+    switch(filterType) {
+      case 'all':
+        row.style.display = '';
+        break;
+      case 'matching':
+        row.style.display = row.classList.contains('matching-row') ? '' : 'none';
+        break;
+      case 'not-matching':
+        row.style.display = row.classList.contains('not-matching-row') ? '' : 'none';
+        break;
+      case 'color-issues':
+        const hasColorIssue = row.dataset.issues && 
+          (row.dataset.issues.includes('TEXT_COLOR') || row.dataset.issues.includes('BACKGROUND_COLOR'));
+        row.style.display = hasColorIssue ? '' : 'none';
+        break;
+      case 'font-issues':
+        const hasFontIssue = row.dataset.issues && row.dataset.issues.includes('FONT_SIZE');
+        row.style.display = hasFontIssue ? '' : 'none';
+        break;
+    }
+  });
+}

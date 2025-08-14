@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import Tesseract from 'tesseract.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -41,21 +42,32 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-// Figma API proxy endpoint
+// Figma API proxy endpoint - supports both body and header token authentication
 app.post('/figma/fetch', async (req, res) => {
   try {
-    const { fileKey, nodeId, token } = req.body;
+    const { fileKey, nodeId, token: bodyToken, useHeaderAuth = false } = req.body;
+    
+    // Check for token in header or body
+    const token = useHeaderAuth ? req.headers['x-figma-token'] : bodyToken;
     
     if (!fileKey || !token) {
-      return res.status(400).json({ error: 'Missing fileKey or token' });
+      return res.status(400).json({ 
+        error: 'Missing fileKey or token. Token can be sent in body or X-Figma-Token header' 
+      });
     }
     
-    let url = `https://api.figma.com/v1/files/${fileKey}`;
+    // Support both URL formats:
+    // 1. Original: /v1/files/{fileKey}/nodes?ids={nodeId}
+    // 2. New format from screenshot: /v1/files/{fileKey}/nodes/{nodeId}
+    let url;
     
     if (nodeId) {
       // Ensure node ID uses colon format for API
       const apiNodeId = nodeId.replace('-', ':');
-      url += `/nodes?ids=${apiNodeId}`;
+      // Use the new format shown in the screenshot
+      url = `https://api.figma.com/v1/files/${fileKey}/nodes?ids=${apiNodeId}`;
+    } else {
+      url = `https://api.figma.com/v1/files/${fileKey}`;
     }
     
     const response = await fetch(url, {
@@ -479,11 +491,44 @@ async function analyzeWithOpenAI(screenshotPath, figmaProperties, apiKey) {
     if (hasFormFields) {
       // Field-specific analysis
       prompt = createFieldAnalysisPrompt(figmaProperties);
-      systemMessage = "You are a precise UI field detection and validation tool. Your job is to:\n1. Detect ALL form fields (text inputs, buttons, checkboxes, dropdowns, etc.) in the screenshot\n2. Note their EXACT pixel positions (x,y coordinates from top-left corner)\n3. Measure their dimensions (width × height)\n4. Identify visual properties (colors, borders, text)\n5. Match them with expected fields from the design specification\n\nBe extremely accurate with coordinates and dimensions. The analysis depends on precise position data.\n\nYou MUST respond with ONLY a JSON object - no other text, no markdown, no explanations. Just the raw JSON starting with { and ending with }.";
+      systemMessage = `You are an expert UI/UX validation system with advanced computer vision capabilities. Your role is to perform precise visual comparison between implementation screenshots and Figma design specifications.
+
+CORE RESPONSIBILITIES:
+1. DETECT: Identify ALL interactive elements (inputs, buttons, checkboxes, dropdowns, links, etc.) with pixel-perfect accuracy
+2. MEASURE: Record exact positions (x,y from top-left), dimensions (width×height), and visual properties
+3. COMPARE: Match detected elements against expected specifications from Figma
+4. ANALYZE: Identify all deviations - position shifts, size differences, color variations, missing elements
+5. REPORT: Provide actionable feedback with specific coordinates and measurements
+
+PRECISION REQUIREMENTS:
+- Coordinates must be exact pixel values from the top-left corner (0,0)
+- Measure to the element's actual boundaries, not including shadows or focus rings
+- Report colors in hex format (#RRGGBB)
+- Note subtle differences (even 1-2px variations matter in pixel-perfect implementations)
+
+OUTPUT FORMAT:
+You MUST respond with ONLY a valid JSON object. No markdown formatting, no explanations, no additional text.
+Start with { and end with }. The JSON must be parseable by JSON.parse().`;
     } else {
       // General UI analysis
       prompt = createUIAnalysisPrompt(figmaProperties);
-      systemMessage = "You are a UI/UX comparison tool that analyzes screenshots against design specifications. You MUST respond with ONLY a JSON object - no other text, no markdown, no explanations. Just the raw JSON starting with { and ending with }.";
+      systemMessage = `You are an advanced UI/UX comparison system that performs detailed visual analysis between screenshots and Figma design specifications.
+
+ANALYSIS OBJECTIVES:
+1. Compare ALL visual properties against the provided Figma specifications
+2. Identify and measure deviations in colors, spacing, typography, layout, and dimensions
+3. Provide specific, measurable differences (not general observations)
+4. Report exact locations and values for all mismatches
+
+COMPARISON METHODOLOGY:
+- Use Delta E for color comparison (ΔE < 1 = imperceptible, ΔE > 10 = different colors)
+- Measure spacing in pixels from element boundaries
+- Report position deviations with exact pixel offsets
+- Identify missing or unexpected elements with their locations
+
+OUTPUT REQUIREMENTS:
+Return ONLY a valid JSON object - no markdown, no explanations, no additional text.
+The response must start with { and end with }. Must be valid JSON parseable by JSON.parse().`;
     }
     
     console.log('Sending image to OpenAI for analysis...');
@@ -644,11 +689,12 @@ Return a JSON object with this EXACT structure:
   "screenType": {
     "detected": "login|register|profile|search|contact|checkout|form|unknown",
     "confidence": 0.0-1.0,
-    "matchesExpected": true|false
+    "matchesExpected": true|false,
+    "reasoning": "Why this screen type was identified"
   },
   "detectedFields": [
     {
-      "type": "input|button|checkbox|radio|select|textarea",
+      "type": "input|button|checkbox|radio|select|textarea|link",
       "bounds": {
         "x": 0,
         "y": 0,
@@ -659,40 +705,107 @@ Return a JSON object with this EXACT structure:
         "backgroundColor": "#hexcode or transparent",
         "borderColor": "#hexcode or none",
         "borderRadius": 0,
+        "borderWidth": 0,
         "hasBorder": true|false,
         "hasPlaceholder": true|false,
         "placeholderText": "detected placeholder text or empty",
         "labelText": "detected label text or empty",
         "buttonText": "for buttons only, the button text",
         "isDisabled": true|false,
-        "hasFocus": true|false
+        "hasFocus": true|false,
+        "fontSize": 0,
+        "fontFamily": "detected font family"
       },
-      "confidence": 0.0-1.0
+      "confidence": 0.0-1.0,
+      "notes": "Any additional observations about this field"
     }
   ],
   "fieldMatching": {
     "totalExpected": ${formFields.length},
     "totalDetected": 0,
+    "overallMatchRate": 0.0-1.0,
     "matches": [
       {
         "expectedFieldName": "field name from design",
+        "expectedType": "expected field type",
         "detectedFieldIndex": 0,
         "matchConfidence": 0.0-1.0,
         "positionMatch": true|false,
+        "positionDeviation": {"x": 0, "y": 0},
         "typeMatch": true|false,
-        "styleMatch": true|false
+        "sizeMatch": true|false,
+        "sizeDeviation": {"width": 0, "height": 0},
+        "styleMatch": true|false,
+        "styleDeviations": ["List of style differences"]
       }
     ],
-    "unmatchedExpected": ["list of expected field names that weren't found"],
-    "unmatchedDetected": [0, 1, 2]
+    "unmatchedExpected": [
+      {
+        "fieldName": "name",
+        "fieldType": "type",
+        "expectedPosition": {"x": 0, "y": 0},
+        "reason": "Why this field wasn't found"
+      }
+    ],
+    "unmatchedDetected": [
+      {
+        "fieldIndex": 0,
+        "fieldType": "type",
+        "position": {"x": 0, "y": 0},
+        "description": "Description of unexpected field"
+      }
+    ]
   },
-  "issues": [
+  "mismatches": [
     {
-      "type": "missing|extra|mismatch|style",
+      "category": "position|size|style|color|missing|extra",
       "severity": "critical|major|minor",
-      "description": "Clear description of the issue"
+      "elementName": "Name of the element",
+      "location": {"x": 0, "y": 0},
+      "expected": "What was expected from Figma",
+      "actual": "What was found in screenshot",
+      "deviation": "Specific measurement of difference",
+      "recommendation": "How to fix this issue",
+      "visualImpact": "How this affects the user experience"
     }
-  ]
+  ],
+  "colorAnalysis": {
+    "primaryColorMatch": true|false,
+    "colorDeviations": [
+      {
+        "element": "Element name",
+        "expectedColor": "#hexcode",
+        "actualColor": "#hexcode",
+        "deltaE": 0.0,
+        "location": {"x": 0, "y": 0},
+        "acceptability": "perfect|acceptable|noticeable|unacceptable"
+      }
+    ]
+  },
+  "spacingAnalysis": {
+    "overallConsistency": 0.0-1.0,
+    "deviations": [
+      {
+        "type": "padding|margin|gap",
+        "location": "Description of where",
+        "expected": "Xpx",
+        "actual": "Ypx",
+        "impact": "visual impact description"
+      }
+    ]
+  },
+  "summary": {
+    "overallScore": 0-100,
+    "totalMismatches": 0,
+    "criticalIssues": 0,
+    "majorIssues": 0,
+    "minorIssues": 0,
+    "topPriorities": [
+      "Most important issue to fix first",
+      "Second priority",
+      "Third priority"
+    ]
+  }
 }`;
 }
 
@@ -761,90 +874,214 @@ Return a JSON object with this exact structure:
 {
   "comparisonResults": {
     "overallMatch": 0-100,
-    "summary": "Brief summary of how well the implementation matches the design"
+    "pixelPerfectScore": 0-100,
+    "summary": "Brief summary of how well the implementation matches the design",
+    "matchBreakdown": {
+      "colors": 0-100,
+      "spacing": 0-100,
+      "typography": 0-100,
+      "layout": 0-100,
+      "dimensions": 0-100
+    }
   },
-  "colorComparison": {
-    "figmaColors": ["list of expected colors from design"],
-    "detectedColors": ["list of colors found in screenshot"],
-    "matches": [
+  "mismatches": [
+    {
+      "category": "color|spacing|typography|layout|dimension|element",
+      "severity": "critical|major|minor",
+      "elementDescription": "What element is affected",
+      "location": {
+        "description": "Where in the UI (e.g., 'top navigation', 'main button')",
+        "coordinates": {"x": 0, "y": 0}
+      },
+      "expected": {
+        "value": "Expected value from Figma",
+        "source": "Where this expectation comes from in Figma"
+      },
+      "actual": {
+        "value": "Actual value in screenshot",
+        "measurement": "How this was measured"
+      },
+      "deviation": {
+        "amount": "Numeric or descriptive deviation",
+        "percentage": "Percentage difference if applicable"
+      },
+      "visualImpact": "High|Medium|Low - How noticeable this is to users",
+      "recommendation": "Specific action to fix this mismatch",
+      "codeHint": "Suggested CSS/code change if applicable"
+    }
+  ],
+  "colorAnalysis": {
+    "overallColorAccuracy": 0-100,
+    "colorPaletteCoverage": "X of Y expected colors found",
+    "deviations": [
       {
-        "figmaColor": "#hexcode",
-        "closestDetected": "#hexcode",
+        "element": "Element name or description",
+        "location": {"x": 0, "y": 0},
+        "figmaColor": {
+          "hex": "#hexcode",
+          "name": "Color name if available",
+          "usage": "primary|secondary|accent|background|text"
+        },
+        "detectedColor": {
+          "hex": "#hexcode",
+          "confidence": 0.0-1.0
+        },
         "deltaE": 0.0,
-        "match": "exact|close|different"
+        "perceptibility": "imperceptible|barely|noticeable|obvious",
+        "acceptability": "perfect|acceptable|review|fix",
+        "fix": "Change color to #hexcode"
       }
     ],
-    "missingColors": ["colors in Figma but not in screenshot"],
-    "extraColors": ["colors in screenshot but not in Figma"],
-    "deviations": ["Specific color deviations, e.g., 'Button color is #2196F3 instead of specified #1976D2'"]
-  },
-  "spacingComparison": {
-    "figmaSpacing": {
-      "padding": {"top": 0, "right": 0, "bottom": 0, "left": 0},
-      "gap": 0
-    },
-    "detectedSpacing": {
-      "padding": {"top": 0, "right": 0, "bottom": 0, "left": 0},
-      "gaps": [list of detected gaps between elements]
-    },
-    "deviations": [
-      "Padding is 12px instead of specified 16px",
-      "Gap between elements is 20px instead of specified 24px"
+    "missingColors": [
+      {
+        "color": "#hexcode",
+        "name": "Color name",
+        "expectedUsage": "Where this color should appear"
+      }
+    ],
+    "unexpectedColors": [
+      {
+        "color": "#hexcode",
+        "location": "Where found",
+        "possibleReason": "Why this might have appeared"
+      }
     ]
   },
-  "dimensionComparison": {
-    "figmaDimensions": {"width": 0, "height": 0},
-    "detectedDimensions": {"width": 0, "height": 0},
-    "deviations": ["Width is 380px instead of specified 400px"]
+  "spacingAnalysis": {
+    "consistencyScore": 0-100,
+    "gridAlignment": true|false,
+    "deviations": [
+      {
+        "type": "padding|margin|gap",
+        "element": "Element or area description",
+        "location": "Visual location description",
+        "expected": {
+          "value": "Xpx",
+          "side": "top|right|bottom|left|all"
+        },
+        "actual": {
+          "value": "Ypx",
+          "measured": "How this was measured"
+        },
+        "deviation": "±Zpx",
+        "impact": "Breaks rhythm|Creates misalignment|Minor visual difference",
+        "fix": "Set padding/margin to Xpx"
+      }
+    ],
+    "rhythmAnalysis": {
+      "hasConsistentRhythm": true|false,
+      "baseUnit": "Detected base spacing unit (e.g., 8px)",
+      "violations": ["Areas not following the spacing rhythm"]
+    }
   },
-  "elementComparison": {
-    "figmaElementCount": 0,
-    "detectedElementCount": 0,
-    "missingElements": [
+  "typographyAnalysis": {
+    "overallAccuracy": 0-100,
+    "deviations": [
       {
-        "type": "element type",
-        "name": "element name from Figma",
-        "expectedPosition": {"x": 0, "y": 0}
+        "element": "Text element description",
+        "location": "Where in UI",
+        "expected": {
+          "fontFamily": "Font name",
+          "fontSize": "Xpx",
+          "fontWeight": "weight",
+          "lineHeight": "value",
+          "letterSpacing": "value"
+        },
+        "actual": {
+          "fontFamily": "Detected font",
+          "fontSize": "Ypx",
+          "fontWeight": "weight",
+          "lineHeight": "value",
+          "letterSpacing": "value"
+        },
+        "deviations": ["List of specific differences"],
+        "readabilityImpact": "None|Minor|Major",
+        "fix": "CSS properties to apply"
+      }
+    ]
+  },
+  "layoutAnalysis": {
+    "layoutType": "Detected layout type (flex|grid|absolute)",
+    "alignmentScore": 0-100,
+    "deviations": [
+      {
+        "issue": "Description of layout issue",
+        "elements": ["Affected elements"],
+        "expected": "Expected layout behavior",
+        "actual": "Actual layout behavior",
+        "impact": "Visual impact description",
+        "fix": "How to correct the layout"
       }
     ],
-    "extraElements": [
+    "responsiveness": {
+      "appearsResponsive": true|false,
+      "concerns": ["Potential responsive issues"]
+    }
+  },
+  "elementAnalysis": {
+    "expectedCount": 0,
+    "detectedCount": 0,
+    "matchRate": 0-100,
+    "missing": [
       {
-        "type": "element type",
-        "position": {"x": 0, "y": 0},
-        "description": "Element found but not in design"
+        "element": "Element name/type",
+        "expectedLocation": {"x": 0, "y": 0},
+        "importance": "critical|important|nice-to-have",
+        "impact": "Functionality or visual impact"
       }
     ],
-    "positionDeviations": [
+    "extra": [
       {
-        "element": "element name",
+        "element": "Element description",
+        "location": {"x": 0, "y": 0},
+        "possibleReason": "Why this might be here"
+      }
+    ],
+    "mispositioned": [
+      {
+        "element": "Element name",
         "expectedPosition": {"x": 0, "y": 0},
         "actualPosition": {"x": 0, "y": 0},
-        "deviation": {"x": 0, "y": 0}
+        "offset": {"x": 0, "y": 0},
+        "fix": "Move element by X,Y pixels"
       }
     ]
   },
-  "typographyComparison": {
-    "figmaFonts": ["expected fonts"],
-    "detectedFonts": ["detected fonts"],
-    "deviations": ["Font is Arial instead of specified Roboto"]
+  "recommendations": {
+    "critical": [
+      "Must-fix issues affecting core functionality or brand"
+    ],
+    "important": [
+      "Should-fix issues affecting user experience"
+    ],
+    "minor": [
+      "Nice-to-fix issues for pixel perfection"
+    ],
+    "codeSnippets": [
+      {
+        "element": "Element to fix",
+        "css": "Suggested CSS code",
+        "explanation": "Why this fix works"
+      }
+    ]
   },
-  "layoutComparison": {
-    "figmaLayout": "specified layout mode",
-    "detectedLayout": "detected layout pattern",
-    "alignmentIssues": ["Elements not aligned as specified"],
-    "deviations": ["Layout appears to be grid instead of specified flexbox"]
+  "summary": {
+    "overallScore": 0-100,
+    "pixelPerfect": true|false,
+    "productionReady": true|false,
+    "totalIssues": 0,
+    "breakdown": {
+      "critical": 0,
+      "major": 0,
+      "minor": 0
+    },
+    "estimatedFixTime": "Quick fix|Few hours|Half day|Full day",
+    "topPriorities": [
+      "First issue to address",
+      "Second issue to address",
+      "Third issue to address"
+    ]
   },
-  "borderComparison": {
-    "figmaBorders": {"radius": 0, "width": 0},
-    "detectedBorders": {"radius": 0, "width": 0},
-    "deviations": ["Border radius is 4px instead of specified 8px"]
-  },
-  "criticalIssues": [
-    "Most important deviations that significantly impact the design"
-  ],
-  "recommendations": [
-    "Specific fixes needed to match the Figma design, e.g., 'Increase padding to 16px to match design'"
-  ],
   "confidence": 0.0-1.0
 }
 
@@ -894,7 +1131,7 @@ function parseAIResponse(aiResponse) {
 function convertParsedResponse(parsed) {
   // Check if this is a field-specific response
   if (parsed.detectedFields && parsed.fieldMatching) {
-    // Field-specific response format
+    // Field-specific response format with enhanced structure
     return {
       // Field detection results
       screenType: parsed.screenType || { detected: 'unknown', confidence: 0, matchesExpected: false },
@@ -904,17 +1141,35 @@ function convertParsedResponse(parsed) {
       fieldMatching: parsed.fieldMatching || {
         totalExpected: 0,
         totalDetected: 0,
+        overallMatchRate: 0,
         matches: [],
         unmatchedExpected: [],
         unmatchedDetected: []
       },
+      
+      // Enhanced mismatch reporting
+      mismatches: parsed.mismatches || [],
+      colorAnalysis: parsed.colorAnalysis || {},
+      spacingAnalysis: parsed.spacingAnalysis || {},
+      
+      // Summary information
+      summary: parsed.summary || {
+        overallScore: 0,
+        totalMismatches: parsed.mismatches?.length || 0,
+        criticalIssues: 0,
+        majorIssues: 0,
+        minorIssues: 0,
+        topPriorities: []
+      },
+      
       fieldIssues: parsed.issues || [],
       
       // Also include standard comparison results for compatibility
       comparisonResults: {
-        overallMatch: parsed.fieldMatching ? 
-          Math.round((parsed.fieldMatching.matches.length / Math.max(parsed.fieldMatching.totalExpected, 1)) * 100) : 0,
-        summary: `Detected ${parsed.fieldMatching?.totalDetected || 0} fields, expected ${parsed.fieldMatching?.totalExpected || 0}`
+        overallMatch: parsed.summary?.overallScore || 
+          (parsed.fieldMatching ? Math.round((parsed.fieldMatching.matches.length / Math.max(parsed.fieldMatching.totalExpected, 1)) * 100) : 0),
+        summary: parsed.summary?.topPriorities?.[0] || 
+          `Detected ${parsed.fieldMatching?.totalDetected || 0} fields, expected ${parsed.fieldMatching?.totalExpected || 0}`
       },
       
       // Empty standard properties for compatibility
@@ -926,63 +1181,105 @@ function convertParsedResponse(parsed) {
     };
   }
   
-  // Standard UI comparison response
+  // Standard UI comparison response with enhanced structure
   return {
     // Preserve comparison results
     comparisonResults: parsed.comparisonResults || { overallMatch: 0, summary: 'No comparison available' },
-        
-        // Extract elements from comparison
-        elements: parsed.elementComparison?.extraElements || [],
-        
-        // Extract spacing issues from comparison
-        spacing: {
-          patterns: parsed.spacingComparison?.detectedSpacing?.gaps ? ['detected'] : [],
-          gaps: parsed.spacingComparison?.detectedSpacing?.gaps || [],
-          issues: parsed.spacingComparison?.deviations || []
-        },
-        
-        // Extract layout issues from comparison
-        layout: {
-          type: parsed.layoutComparison?.detectedLayout || 'unknown',
-          patterns: [],
-          issues: [
-            ...(parsed.layoutComparison?.alignmentIssues || []),
-            ...(parsed.layoutComparison?.deviations || [])
-          ]
-        },
-        
-        // Extract typography issues from comparison
-        typography: {
-          fonts: parsed.typographyComparison?.detectedFonts || [],
-          sizes: [],
-          hierarchy: 'unknown',
-          issues: parsed.typographyComparison?.deviations || []
-        },
-        
-        // Extract color issues from comparison
-        colors: {
-          primary: parsed.colorComparison?.detectedColors || [],
-          secondary: [],
-          issues: parsed.colorComparison?.deviations || []
-        },
-        
-        // Add comparison-specific data
-        colorComparison: parsed.colorComparison,
-        spacingComparison: parsed.spacingComparison,
-        dimensionComparison: parsed.dimensionComparison,
-        elementComparison: parsed.elementComparison,
-        typographyComparison: parsed.typographyComparison,
-        layoutComparison: parsed.layoutComparison,
-        borderComparison: parsed.borderComparison,
-        
-        // Use critical issues and recommendations directly
-        criticalIssues: parsed.criticalIssues || [],
-        recommendations: parsed.recommendations || [],
-        insights: [
-          parsed.comparisonResults?.summary || 'Comparison analysis completed',
-          ...(parsed.criticalIssues || [])
-        ],
-        
+    
+    // Enhanced mismatch reporting
+    mismatches: parsed.mismatches || [],
+    
+    // Extract elements from comparison
+    elements: parsed.elementAnalysis?.missing || parsed.elementComparison?.missingElements || [],
+    
+    // Extract spacing issues from enhanced structure
+    spacing: {
+      patterns: parsed.spacingAnalysis?.rhythmAnalysis?.baseUnit ? [parsed.spacingAnalysis.rhythmAnalysis.baseUnit] : 
+                (parsed.spacingComparison?.detectedSpacing?.gaps ? ['detected'] : []),
+      gaps: parsed.spacingAnalysis?.deviations?.map(d => d.actual?.value) || 
+            parsed.spacingComparison?.detectedSpacing?.gaps || [],
+      issues: parsed.spacingAnalysis?.deviations?.map(d => d.impact) || 
+              parsed.spacingComparison?.deviations || []
+    },
+    
+    // Extract layout issues from enhanced structure
+    layout: {
+      type: parsed.layoutAnalysis?.layoutType || parsed.layoutComparison?.detectedLayout || 'unknown',
+      patterns: [],
+      issues: parsed.layoutAnalysis?.deviations?.map(d => d.issue) || [
+        ...(parsed.layoutComparison?.alignmentIssues || []),
+        ...(parsed.layoutComparison?.deviations || [])
+      ]
+    },
+    
+    // Extract typography issues from enhanced structure
+    typography: {
+      fonts: parsed.typographyAnalysis?.deviations?.map(d => d.actual?.fontFamily).filter(Boolean) || 
+             parsed.typographyComparison?.detectedFonts || [],
+      sizes: parsed.typographyAnalysis?.deviations?.map(d => d.actual?.fontSize).filter(Boolean) || [],
+      hierarchy: 'unknown',
+      issues: parsed.typographyAnalysis?.deviations?.map(d => d.deviations?.join(', ')).filter(Boolean) || 
+              parsed.typographyComparison?.deviations || []
+    },
+    
+    // Extract color issues from enhanced structure
+    colors: {
+      primary: parsed.colorAnalysis?.deviations?.map(d => d.detectedColor?.hex).filter(Boolean) || 
+               parsed.colorComparison?.detectedColors || [],
+      secondary: [],
+      issues: parsed.colorAnalysis?.deviations?.map(d => d.fix).filter(Boolean) || 
+              parsed.colorComparison?.deviations || []
+    },
+    
+    // Add all analysis sections
+    colorAnalysis: parsed.colorAnalysis,
+    spacingAnalysis: parsed.spacingAnalysis,
+    typographyAnalysis: parsed.typographyAnalysis,
+    layoutAnalysis: parsed.layoutAnalysis,
+    elementAnalysis: parsed.elementAnalysis,
+    
+    // Legacy comparison data for backward compatibility
+    colorComparison: parsed.colorComparison || parsed.colorAnalysis,
+    spacingComparison: parsed.spacingComparison || parsed.spacingAnalysis,
+    dimensionComparison: parsed.dimensionComparison,
+    elementComparison: parsed.elementComparison || parsed.elementAnalysis,
+    typographyComparison: parsed.typographyComparison || parsed.typographyAnalysis,
+    layoutComparison: parsed.layoutComparison || parsed.layoutAnalysis,
+    borderComparison: parsed.borderComparison,
+    
+    // Enhanced recommendations structure
+    criticalIssues: parsed.recommendations?.critical || parsed.criticalIssues || [],
+    recommendations: [
+      ...(parsed.recommendations?.critical || []),
+      ...(parsed.recommendations?.important || []),
+      ...(parsed.recommendations?.minor || [])
+    ].filter(Boolean).length > 0 ? [
+      ...(parsed.recommendations?.critical || []),
+      ...(parsed.recommendations?.important || []),
+      ...(parsed.recommendations?.minor || [])
+    ].filter(Boolean) : parsed.recommendations || [],
+    codeSnippets: parsed.recommendations?.codeSnippets || [],
+    
+    // Summary information  
+    summary: parsed.summary || {
+      overallScore: parsed.comparisonResults?.overallMatch || 0,
+      pixelPerfect: false,
+      productionReady: false,
+      totalIssues: parsed.mismatches?.length || 0,
+      breakdown: {
+        critical: parsed.mismatches?.filter(m => m.severity === 'critical').length || 0,
+        major: parsed.mismatches?.filter(m => m.severity === 'major').length || 0,
+        minor: parsed.mismatches?.filter(m => m.severity === 'minor').length || 0
+      },
+      topPriorities: parsed.summary?.topPriorities || []
+    },
+    
+    insights: [
+      parsed.comparisonResults?.summary || 'Comparison analysis completed',
+      ...(parsed.summary?.topPriorities || []),
+      ...(parsed.criticalIssues || [])
+    ].filter(Boolean),
+    
     confidence: parsed.confidence || 0.5
   };
 }
@@ -5106,6 +5403,735 @@ function hexToRgb(hex) {
     b: parseInt(result[3], 16)
   } : null;
 }
+
+// OCR Text Extraction using Tesseract.js
+async function extractAllTextFromScreenshot(screenshotPath) {
+  try {
+    console.log('Starting OCR text extraction from:', screenshotPath);
+    
+    const { data } = await Tesseract.recognize(
+      screenshotPath,
+      'eng',
+      {
+        logger: m => {
+          if (m.status === 'recognizing text') {
+            console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
+          }
+        }
+      }
+    );
+    
+    // Group words into logical text elements based on lines and proximity
+    const textElements = [];
+    const processedLines = new Set();
+    
+    // Process lines to create complete text elements
+    if (data.lines && data.lines.length > 0) {
+      data.lines.forEach(line => {
+        if (line.text && line.text.trim() && !processedLines.has(line.text)) {
+          processedLines.add(line.text);
+          
+          // Create a text element from the complete line
+          textElements.push({
+            text: line.text.trim(),
+            bounds: {
+              x: line.bbox.x0,
+              y: line.bbox.y0,
+              width: line.bbox.x1 - line.bbox.x0,
+              height: line.bbox.y1 - line.bbox.y0
+            },
+            confidence: line.confidence,
+            fontSize: Math.round((line.bbox.y1 - line.bbox.y0) * 0.75),
+            type: 'line'
+          });
+          
+          // Also add individual words from this line for fallback matching
+          if (line.words && line.words.length > 1) {
+            // For multi-word lines, also create elements for significant words (> 3 chars)
+            line.words.forEach(word => {
+              if (word.text && word.text.length > 3 && !word.text.match(/^(the|and|for|with|from|this|that)$/i)) {
+                textElements.push({
+                  text: word.text.trim(),
+                  bounds: {
+                    x: word.bbox.x0,
+                    y: word.bbox.y0,
+                    width: word.bbox.x1 - word.bbox.x0,
+                    height: word.bbox.y1 - word.bbox.y0
+                  },
+                  confidence: word.confidence,
+                  fontSize: Math.round((word.bbox.y1 - word.bbox.y0) * 0.75),
+                  type: 'word',
+                  parentLine: line.text.trim()
+                });
+              }
+            });
+          }
+        }
+      });
+    }
+    
+    // Process paragraphs for better context
+    const paragraphElements = [];
+    if (data.paragraphs && data.paragraphs.length > 0) {
+      data.paragraphs.forEach(para => {
+        if (para.text && para.text.trim()) {
+          paragraphElements.push({
+            text: para.text.trim(),
+            bounds: {
+              x: para.bbox.x0,
+              y: para.bbox.y0,
+              width: para.bbox.x1 - para.bbox.x0,
+              height: para.bbox.y1 - para.bbox.y0
+            },
+            confidence: para.confidence,
+            type: 'paragraph'
+          });
+        }
+      });
+    }
+    
+    // Also create button/label groups by detecting common UI patterns
+    const uiPatterns = [
+      /^(SIGN\s*(UP|IN)|LOG\s*(IN|OUT)|SUBMIT|CANCEL|OK|NEXT|BACK|CONTINUE)$/i,
+      /^(Email|Password|Username|Name|Phone|Address|City|State|Zip)$/i,
+      /^(Terms|Privacy|Policy|Service|Agreement).*$/i
+    ];
+    
+    // Group nearby words that form common UI elements
+    const groupedElements = [];
+    const usedWords = new Set();
+    
+    data.words?.forEach((word, index) => {
+      if (usedWords.has(index)) return;
+      
+      // Check if this word is part of a common pattern
+      for (const pattern of uiPatterns) {
+        // Look ahead to see if combining with next words matches pattern
+        let combined = word.text;
+        let endIndex = index;
+        let bbox = { ...word.bbox };
+        
+        for (let j = index + 1; j < Math.min(index + 5, data.words.length); j++) {
+          const nextWord = data.words[j];
+          
+          // Check if words are on same line (similar Y position)
+          if (Math.abs(nextWord.bbox.y0 - word.bbox.y0) < 10) {
+            const testCombined = combined + ' ' + nextWord.text;
+            
+            if (pattern.test(testCombined) || testCombined.match(pattern)) {
+              combined = testCombined;
+              endIndex = j;
+              bbox.x1 = Math.max(bbox.x1, nextWord.bbox.x1);
+              bbox.y1 = Math.max(bbox.y1, nextWord.bbox.y1);
+            }
+          }
+        }
+        
+        if (endIndex > index) {
+          // Mark words as used
+          for (let k = index; k <= endIndex; k++) {
+            usedWords.add(k);
+          }
+          
+          groupedElements.push({
+            text: combined.trim(),
+            bounds: {
+              x: bbox.x0,
+              y: bbox.y0,
+              width: bbox.x1 - bbox.x0,
+              height: bbox.y1 - bbox.y0
+            },
+            confidence: word.confidence,
+            fontSize: Math.round((bbox.y1 - bbox.y0) * 0.75),
+            type: 'ui-element'
+          });
+          break;
+        }
+      }
+    });
+    
+    // Combine all elements, prioritizing larger text blocks
+    const allElements = [
+      ...paragraphElements,
+      ...textElements,
+      ...groupedElements
+    ];
+    
+    // Remove duplicates based on text content
+    const uniqueElements = [];
+    const seenTexts = new Set();
+    
+    allElements.forEach(element => {
+      const normalizedText = element.text.toLowerCase().trim();
+      if (!seenTexts.has(normalizedText) && normalizedText.length > 0) {
+        seenTexts.add(normalizedText);
+        uniqueElements.push(element);
+      }
+    });
+    
+    console.log(`OCR extracted and grouped into ${uniqueElements.length} text elements`);
+    console.log('Sample elements:', uniqueElements.slice(0, 5).map(e => `"${e.text}" (${e.type})`));
+    
+    return {
+      elements: uniqueElements,
+      lines: data.lines || [],
+      paragraphs: data.paragraphs || [],
+      words: data.words || [],
+      fullText: data.text
+    };
+  } catch (error) {
+    console.error('OCR extraction error:', error);
+    return { elements: [], lines: [], paragraphs: [], words: [], fullText: '' };
+  }
+}
+
+// Enhanced Figma text extraction with all properties
+function extractAllTextFromFigma(figmaJSON) {
+  const textElements = [];
+  
+  function rgbToHex(color) {
+    if (!color) return null;
+    const r = Math.round(color.r * 255);
+    const g = Math.round(color.g * 255);
+    const b = Math.round(color.b * 255);
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+  }
+  
+  function traverse(node, parentBg = null) {
+    // Extract text nodes
+    if (node.type === 'TEXT' && node.characters) {
+      const element = {
+        id: node.id,
+        text: node.characters.trim(),
+        bounds: node.absoluteBoundingBox,
+        textColor: null,
+        backgroundColor: parentBg,
+        fontSize: node.style?.fontSize || null,
+        fontFamily: node.style?.fontFamily || null,
+        fontWeight: node.style?.fontWeight || null,
+        letterSpacing: node.style?.letterSpacing || null,
+        lineHeight: node.style?.lineHeightPx || node.style?.lineHeightPercent || null,
+        textAlign: node.style?.textAlignHorizontal || null
+      };
+      
+      // Extract text color from fills
+      if (node.fills && node.fills.length > 0 && node.fills[0].type === 'SOLID') {
+        element.textColor = rgbToHex(node.fills[0].color);
+      }
+      
+      textElements.push(element);
+    }
+    
+    // Track background colors from parent frames/rectangles
+    let currentBg = parentBg;
+    if ((node.type === 'FRAME' || node.type === 'RECTANGLE' || node.type === 'COMPONENT') && 
+        node.fills && node.fills.length > 0 && node.fills[0].type === 'SOLID') {
+      currentBg = rgbToHex(node.fills[0].color);
+    }
+    
+    // Traverse children
+    if (node.children) {
+      node.children.forEach(child => traverse(child, currentBg));
+    }
+  }
+  
+  traverse(figmaJSON);
+  
+  console.log(`Extracted ${textElements.length} text elements from Figma`);
+  return textElements;
+}
+
+// Extract color from specific region of screenshot
+async function extractElementColors(screenshotPath, bounds) {
+  try {
+    // Extract the region containing the text element
+    const regionBuffer = await sharp(screenshotPath)
+      .extract({
+        left: Math.max(0, Math.round(bounds.x)),
+        top: Math.max(0, Math.round(bounds.y)),
+        width: Math.round(bounds.width),
+        height: Math.round(bounds.height)
+      })
+      .raw()
+      .toBuffer();
+    
+    const metadata = await sharp(screenshotPath)
+      .extract({
+        left: Math.max(0, Math.round(bounds.x)),
+        top: Math.max(0, Math.round(bounds.y)),
+        width: Math.round(bounds.width),
+        height: Math.round(bounds.height)
+      })
+      .metadata();
+    
+    // Analyze pixels to find text color (darkest/most frequent non-background color)
+    const colorMap = new Map();
+    const pixelCount = metadata.width * metadata.height;
+    
+    for (let i = 0; i < regionBuffer.length; i += 3) {
+      const r = regionBuffer[i];
+      const g = regionBuffer[i + 1];
+      const b = regionBuffer[i + 2];
+      const hex = '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+      
+      colorMap.set(hex, (colorMap.get(hex) || 0) + 1);
+    }
+    
+    // Sort colors by frequency
+    const sortedColors = Array.from(colorMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(entry => ({ color: entry[0], frequency: entry[1] / pixelCount }));
+    
+    // The most frequent color is likely the background
+    const backgroundColor = sortedColors[0]?.color || '#FFFFFF';
+    
+    // Text color is usually darker and less frequent than background
+    let textColor = '#000000';
+    for (const colorData of sortedColors) {
+      if (colorData.frequency < 0.5) { // Less than 50% of pixels
+        // Check if it's darker than background (simple luminance check)
+        const bgLum = parseInt(backgroundColor.slice(1, 3), 16) + 
+                     parseInt(backgroundColor.slice(3, 5), 16) + 
+                     parseInt(backgroundColor.slice(5, 7), 16);
+        const colorLum = parseInt(colorData.color.slice(1, 3), 16) + 
+                        parseInt(colorData.color.slice(3, 5), 16) + 
+                        parseInt(colorData.color.slice(5, 7), 16);
+        
+        if (Math.abs(bgLum - colorLum) > 100) { // Significant contrast
+          textColor = colorData.color;
+          break;
+        }
+      }
+    }
+    
+    return {
+      textColor,
+      backgroundColor,
+      dominantColors: sortedColors.slice(0, 5).map(c => c.color)
+    };
+  } catch (error) {
+    console.error('Color extraction error:', error);
+    return {
+      textColor: '#000000',
+      backgroundColor: '#FFFFFF',
+      dominantColors: []
+    };
+  }
+}
+
+// Match elements by text content with improved algorithm
+function matchElementsByText(figmaElements, screenshotElements) {
+  const matches = [];
+  const unmatchedFigma = [];
+  const unmatchedScreenshot = [...screenshotElements];
+  
+  // Helper to normalize text for comparison
+  const normalizeText = (text) => {
+    return text
+      .toLowerCase()
+      .replace(/[\s\n\r]+/g, ' ') // Normalize whitespace
+      .replace(/[^\w\s]/g, '') // Remove punctuation
+      .trim();
+  };
+  
+  // Helper to check if texts are similar enough
+  const textsAreSimilar = (text1, text2, threshold = 0.8) => {
+    const norm1 = normalizeText(text1);
+    const norm2 = normalizeText(text2);
+    
+    // Exact match after normalization
+    if (norm1 === norm2) return { score: 1.0, type: 'EXACT' };
+    
+    // Check if one contains the other
+    if (norm1.includes(norm2) || norm2.includes(norm1)) {
+      const lengthRatio = Math.min(norm1.length, norm2.length) / Math.max(norm1.length, norm2.length);
+      return { score: 0.9 * lengthRatio, type: 'CONTAINS' };
+    }
+    
+    // Check word overlap
+    const words1 = norm1.split(' ');
+    const words2 = norm2.split(' ');
+    const commonWords = words1.filter(w => words2.includes(w));
+    const wordOverlapScore = commonWords.length / Math.max(words1.length, words2.length);
+    
+    if (wordOverlapScore >= threshold) {
+      return { score: wordOverlapScore, type: 'WORD_OVERLAP' };
+    }
+    
+    // Levenshtein distance for fuzzy matching
+    const distance = levenshteinDistance(norm1, norm2);
+    const maxLen = Math.max(norm1.length, norm2.length);
+    const similarity = 1 - (distance / maxLen);
+    
+    if (similarity >= threshold) {
+      return { score: similarity, type: 'FUZZY' };
+    }
+    
+    return null;
+  };
+  
+  // First pass: Try to match complete text elements
+  figmaElements.forEach(figmaEl => {
+    let bestMatch = null;
+    let bestScore = 0;
+    let bestIndex = -1;
+    let matchType = null;
+    
+    unmatchedScreenshot.forEach((screenEl, index) => {
+      const similarity = textsAreSimilar(figmaEl.text, screenEl.text, 0.7);
+      
+      if (similarity && similarity.score > bestScore) {
+        bestMatch = screenEl;
+        bestScore = similarity.score;
+        bestIndex = index;
+        matchType = similarity.type;
+      }
+    });
+    
+    if (bestMatch) {
+      matches.push({
+        figmaElement: figmaEl,
+        screenshotElement: bestMatch,
+        matchType: matchType,
+        confidence: bestScore
+      });
+      unmatchedScreenshot.splice(bestIndex, 1);
+    } else {
+      unmatchedFigma.push(figmaEl);
+    }
+  });
+  
+  // Second pass: Try to match unmatched Figma elements with combined screenshot elements
+  const stillUnmatchedFigma = [];
+  unmatchedFigma.forEach(figmaEl => {
+    const figmaWords = normalizeText(figmaEl.text).split(' ');
+    
+    // Look for screenshot elements that together might form the Figma text
+    let combinedMatches = [];
+    let combinedText = '';
+    let totalScore = 0;
+    
+    for (let i = 0; i < unmatchedScreenshot.length; i++) {
+      const screenEl = unmatchedScreenshot[i];
+      const screenWords = normalizeText(screenEl.text).split(' ');
+      
+      // Check if this screenshot element contains words from Figma element
+      const hasCommonWords = screenWords.some(sw => figmaWords.includes(sw));
+      
+      if (hasCommonWords) {
+        combinedMatches.push({ element: screenEl, index: i });
+        combinedText += (combinedText ? ' ' : '') + screenEl.text;
+        
+        // Check if combined text now matches Figma text
+        const similarity = textsAreSimilar(figmaEl.text, combinedText, 0.75);
+        if (similarity) {
+          // Create a combined match
+          const combinedBounds = combinedMatches.reduce((bounds, match) => {
+            const el = match.element;
+            return {
+              x: Math.min(bounds.x, el.bounds.x),
+              y: Math.min(bounds.y, el.bounds.y),
+              width: Math.max(bounds.x + bounds.width, el.bounds.x + el.bounds.width) - Math.min(bounds.x, el.bounds.x),
+              height: Math.max(bounds.y + bounds.height, el.bounds.y + el.bounds.height) - Math.min(bounds.y, el.bounds.y)
+            };
+          }, combinedMatches[0].element.bounds);
+          
+          matches.push({
+            figmaElement: figmaEl,
+            screenshotElement: {
+              text: combinedText,
+              bounds: combinedBounds,
+              type: 'combined',
+              confidence: combinedMatches[0].element.confidence
+            },
+            matchType: 'COMBINED',
+            confidence: similarity.score
+          });
+          
+          // Remove matched screenshot elements
+          combinedMatches.reverse().forEach(match => {
+            unmatchedScreenshot.splice(match.index, 1);
+          });
+          
+          return; // Found a match, move to next Figma element
+        }
+      }
+    }
+    
+    // If still no match found, add to unmatched
+    if (combinedMatches.length === 0) {
+      stillUnmatchedFigma.push(figmaEl);
+    }
+  });
+  
+  console.log(`Matching complete: ${matches.length} matches found`);
+  console.log(`Unmatched Figma: ${stillUnmatchedFigma.length}, Unmatched Screenshot: ${unmatchedScreenshot.length}`);
+  
+  return { 
+    matches, 
+    unmatchedFigma: stillUnmatchedFigma, 
+    unmatchedScreenshot 
+  };
+}
+
+// Calculate Levenshtein distance for fuzzy matching
+function levenshteinDistance(str1, str2) {
+  const matrix = [];
+  
+  for (let i = 0; i <= str2.length; i++) {
+    matrix[i] = [i];
+  }
+  
+  for (let j = 0; j <= str1.length; j++) {
+    matrix[0][j] = j;
+  }
+  
+  for (let i = 1; i <= str2.length; i++) {
+    for (let j = 1; j <= str1.length; j++) {
+      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
+    }
+  }
+  
+  return matrix[str2.length][str1.length];
+}
+
+// Compare colors with tolerance
+function colorsMatch(color1, color2, threshold = 10) {
+  if (!color1 || !color2) return false;
+  
+  // Convert hex to RGB
+  const hex2rgb = hex => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+      r: parseInt(result[1], 16),
+      g: parseInt(result[2], 16),
+      b: parseInt(result[3], 16)
+    } : null;
+  };
+  
+  const rgb1 = hex2rgb(color1);
+  const rgb2 = hex2rgb(color2);
+  
+  if (!rgb1 || !rgb2) return false;
+  
+  // Calculate color distance (simple Euclidean)
+  const distance = Math.sqrt(
+    Math.pow(rgb1.r - rgb2.r, 2) +
+    Math.pow(rgb1.g - rgb2.g, 2) +
+    Math.pow(rgb1.b - rgb2.b, 2)
+  );
+  
+  return distance <= threshold;
+}
+
+// Compare element properties and generate verdict
+function compareElementProperties(figmaEl, screenshotEl, screenshotColors) {
+  const comparison = {
+    element: figmaEl.text,
+    elementType: 'TEXT',
+    
+    figmaProperties: {
+      text: figmaEl.text,
+      textColor: figmaEl.textColor || 'Not specified',
+      backgroundColor: figmaEl.backgroundColor || 'transparent',
+      fontSize: figmaEl.fontSize,
+      fontFamily: figmaEl.fontFamily
+    },
+    
+    screenshotProperties: {
+      text: screenshotEl.text,
+      textColor: screenshotColors.textColor,
+      backgroundColor: screenshotColors.backgroundColor,
+      fontSize: screenshotEl.fontSize,
+      fontFamily: 'Detected from screenshot'
+    },
+    
+    comparison: {
+      text: figmaEl.text.toLowerCase() === screenshotEl.text.toLowerCase() ? 'MATCHING' : 'NOT MATCHING',
+      textColor: 'CHECKING',
+      backgroundColor: 'CHECKING',
+      fontSize: 'CHECKING'
+    },
+    
+    overallMatch: 'PENDING',
+    issues: [],
+    details: []
+  };
+  
+  // Compare text colors
+  if (figmaEl.textColor && screenshotColors.textColor) {
+    const textColorMatch = colorsMatch(figmaEl.textColor, screenshotColors.textColor, 20);
+    comparison.comparison.textColor = textColorMatch ? 'MATCHING' : 'NOT MATCHING';
+    
+    if (!textColorMatch) {
+      comparison.issues.push('TEXT_COLOR');
+      comparison.details.push(`Text color mismatch - Figma: ${figmaEl.textColor} vs UI: ${screenshotColors.textColor}`);
+    }
+  } else {
+    comparison.comparison.textColor = 'UNABLE TO COMPARE';
+  }
+  
+  // Compare background colors
+  if (figmaEl.backgroundColor && screenshotColors.backgroundColor) {
+    const bgColorMatch = colorsMatch(figmaEl.backgroundColor, screenshotColors.backgroundColor, 20);
+    comparison.comparison.backgroundColor = bgColorMatch ? 'MATCHING' : 'NOT MATCHING';
+    
+    if (!bgColorMatch) {
+      comparison.issues.push('BACKGROUND_COLOR');
+      comparison.details.push(`Background color mismatch - Figma: ${figmaEl.backgroundColor} vs UI: ${screenshotColors.backgroundColor}`);
+    }
+  } else {
+    comparison.comparison.backgroundColor = figmaEl.backgroundColor ? 'UNABLE TO COMPARE' : 'N/A';
+  }
+  
+  // Compare font sizes
+  if (figmaEl.fontSize && screenshotEl.fontSize) {
+    const sizeDiff = Math.abs(figmaEl.fontSize - screenshotEl.fontSize);
+    comparison.comparison.fontSize = sizeDiff <= 2 ? 'MATCHING' : 'NOT MATCHING';
+    
+    if (sizeDiff > 2) {
+      comparison.issues.push('FONT_SIZE');
+      comparison.details.push(`Font size mismatch - Figma: ${figmaEl.fontSize}px vs UI: ${screenshotEl.fontSize}px (estimated)`);
+    }
+  } else {
+    comparison.comparison.fontSize = 'UNABLE TO COMPARE';
+  }
+  
+  // Determine overall match
+  const hasIssues = comparison.issues.length > 0;
+  comparison.overallMatch = hasIssues ? 'NOT MATCHING' : 'MATCHING';
+  
+  if (hasIssues) {
+    comparison.severity = comparison.issues.includes('TEXT_COLOR') || comparison.issues.includes('BACKGROUND_COLOR') 
+      ? 'HIGH' : 'MEDIUM';
+  }
+  
+  return comparison;
+}
+
+// Main element comparison endpoint
+app.post('/api/compare-elements', upload.single('screenshot'), async (req, res) => {
+  try {
+    const figmaJSON = JSON.parse(req.body.figmaJSON);
+    const screenshotPath = req.file.path;
+    const colorThreshold = parseInt(req.body.colorThreshold) || 10;
+    const fontSizeThreshold = parseInt(req.body.fontSizeThreshold) || 2;
+    
+    console.log('Starting element-level comparison...');
+    
+    // Step 1: Extract text from Figma
+    const figmaTextElements = extractAllTextFromFigma(figmaJSON);
+    console.log(`Found ${figmaTextElements.length} text elements in Figma`);
+    
+    // Step 2: Extract text from screenshot using OCR with improved grouping
+    const ocrResult = await extractAllTextFromScreenshot(screenshotPath);
+    console.log(`OCR extracted ${ocrResult.elements.length} grouped text elements`);
+    
+    // Step 3: Match elements by text content using improved algorithm
+    const { matches, unmatchedFigma, unmatchedScreenshot } = matchElementsByText(
+      figmaTextElements, 
+      ocrResult.elements
+    );
+    console.log(`Matched ${matches.length} elements by text`);
+    
+    // Step 4: Extract colors and compare properties for each match
+    const comparisonResults = [];
+    
+    for (const match of matches) {
+      // Extract colors from the screenshot region
+      const screenshotColors = await extractElementColors(
+        screenshotPath, 
+        match.screenshotElement.bounds
+      );
+      
+      // Compare properties and generate verdict
+      const comparison = compareElementProperties(
+        match.figmaElement,
+        match.screenshotElement,
+        screenshotColors
+      );
+      
+      comparison.matchConfidence = match.confidence;
+      comparison.matchType = match.matchType;
+      
+      // Add the estimated font size if not already present
+      if (!comparison.screenshotProperties.fontSize && match.screenshotElement.fontSize) {
+        comparison.screenshotProperties.fontSize = match.screenshotElement.fontSize;
+      }
+      
+      comparisonResults.push(comparison);
+    }
+    
+    // Calculate summary statistics
+    const summary = {
+      totalElements: figmaTextElements.length,
+      matchedElements: matches.length,
+      unmatchedFigmaElements: unmatchedFigma.length,
+      unmatchedScreenshotElements: unmatchedScreenshot.length,
+      
+      matchingElements: comparisonResults.filter(r => r.overallMatch === 'MATCHING').length,
+      notMatchingElements: comparisonResults.filter(r => r.overallMatch === 'NOT MATCHING').length,
+      
+      colorIssues: comparisonResults.filter(r => 
+        r.issues.includes('TEXT_COLOR') || r.issues.includes('BACKGROUND_COLOR')
+      ).length,
+      fontIssues: comparisonResults.filter(r => r.issues.includes('FONT_SIZE')).length,
+      
+      overallAccuracy: matches.length > 0 
+        ? ((comparisonResults.filter(r => r.overallMatch === 'MATCHING').length / matches.length) * 100).toFixed(2) + '%'
+        : '0%'
+    };
+    
+    // Generate response
+    const response = {
+      success: true,
+      timestamp: new Date().toISOString(),
+      summary,
+      comparisonTable: comparisonResults,
+      unmatchedFigmaElements: unmatchedFigma.map(el => ({
+        text: el.text,
+        color: el.textColor,
+        fontSize: el.fontSize,
+        reason: 'No matching text found in screenshot'
+      })),
+      unmatchedScreenshotElements: unmatchedScreenshot
+        .filter(el => {
+          // Filter out very short text elements that are likely just fragments
+          return el.text.length > 2 && 
+                 (el.type === 'line' || el.type === 'paragraph' || el.type === 'ui-element' || el.text.includes(' '));
+        })
+        .map(el => ({
+          text: el.text,
+          bounds: el.bounds,
+          type: el.type,
+          reason: 'No matching text found in Figma'
+        })),
+      screenshotPath: `/uploads/${path.basename(screenshotPath)}`
+    };
+    
+    // Save comparison report
+    const reportPath = path.join(__dirname, 'reports', `element-comparison-${Date.now()}.json`);
+    fs.writeFileSync(reportPath, JSON.stringify(response, null, 2));
+    
+    res.json(response);
+    
+  } catch (error) {
+    console.error('Element comparison error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Element comparison failed', 
+      message: error.message 
+    });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

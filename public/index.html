@@ -15,6 +15,7 @@
             <button class="tab-button active" onclick="showResultTab('overview')">Comparison Overview</button>
             <button class="tab-button" onclick="showResultTab('detailed')">Detailed Analysis</button>
             <button class="tab-button" onclick="showResultTab('fields')">Field Analysis</button>
+            <button class="tab-button" onclick="showResultTab('element-comparison')">Element Comparison</button>
             <button class="tab-button" onclick="showResultTab('ai-analysis')">AI Analysis</button>
         </div>
         
@@ -33,6 +34,12 @@
                                     <label for="figmaToken">Access Token</label>
                                     <input type="password" id="figmaToken" placeholder="Your Figma personal access token" />
                                     <small>Get token from Figma → Settings → Personal access tokens</small>
+                                </div>
+                                <div class="input-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="useHeaderAuth" />
+                                        <span>Send token via header (X-Figma-Token) instead of request body</span>
+                                    </label>
                                 </div>
                                 <button type="button" id="fetchFigmaBtn" class="fetch-btn">Fetch Design</button>
                                 <div id="figmaStatus" class="status-message"></div>
@@ -58,6 +65,7 @@
                     <div class="button-group">
                         <button type="submit" class="compare-btn">Compare Images</button>
                         <button type="button" id="rawAnalyzeBtn" class="compare-btn raw-btn">Raw Analysis (No AI)</button>
+                        <button type="button" id="elementCompareBtn" class="compare-btn element-btn">Element Comparison (OCR)</button>
                     </div>
                 </form>
             </div>
@@ -370,6 +378,78 @@
                         <h3>Field Groups</h3>
                         <div id="fieldGroupsList" class="field-groups-list">
                             <!-- Field groups will be populated here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="element-comparison-tab" class="result-tab-content">
+                <div class="element-comparison">
+                    <h2>Element-Level Comparison</h2>
+                    <div class="element-summary">
+                        <div class="summary-cards">
+                            <div class="summary-card">
+                                <h3>Total Elements</h3>
+                                <p id="totalElementsCount">-</p>
+                            </div>
+                            <div class="summary-card">
+                                <h3>Matched Elements</h3>
+                                <p id="matchedElementsCount">-</p>
+                            </div>
+                            <div class="summary-card success">
+                                <h3>Matching</h3>
+                                <p id="matchingCount">-</p>
+                            </div>
+                            <div class="summary-card error">
+                                <h3>Not Matching</h3>
+                                <p id="notMatchingCount">-</p>
+                            </div>
+                        </div>
+                        <div class="accuracy-display">
+                            <h3>Overall Accuracy</h3>
+                            <div class="accuracy-value" id="elementAccuracy">-</div>
+                        </div>
+                    </div>
+                    
+                    <div class="element-filters">
+                        <button class="filter-btn active" onclick="filterElements('all')">All Elements</button>
+                        <button class="filter-btn" onclick="filterElements('matching')">Matching Only</button>
+                        <button class="filter-btn" onclick="filterElements('not-matching')">Issues Only</button>
+                        <button class="filter-btn" onclick="filterElements('color-issues')">Color Issues</button>
+                        <button class="filter-btn" onclick="filterElements('font-issues')">Font Issues</button>
+                    </div>
+                    
+                    <div class="element-comparison-table">
+                        <table id="elementComparisonTable">
+                            <thead>
+                                <tr>
+                                    <th>Element Text</th>
+                                    <th>Match Type</th>
+                                    <th>Figma Text Color</th>
+                                    <th>UI Text Color</th>
+                                    <th>Text Color Match</th>
+                                    <th>Figma BG Color</th>
+                                    <th>UI BG Color</th>
+                                    <th>BG Color Match</th>
+                                    <th>Font Size</th>
+                                    <th>Overall Status</th>
+                                    <th>Issues</th>
+                                </tr>
+                            </thead>
+                            <tbody id="elementComparisonBody">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="unmatched-elements">
+                        <div class="unmatched-section">
+                            <h3>Unmatched Figma Elements</h3>
+                            <div id="unmatchedFigmaList" class="unmatched-list"></div>
+                        </div>
+                        <div class="unmatched-section">
+                            <h3>Unmatched Screenshot Elements</h3>
+                            <div id="unmatchedScreenshotList" class="unmatched-list"></div>
                         </div>
                     </div>
                 </div>

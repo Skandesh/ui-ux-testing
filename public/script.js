@@ -121,14 +121,15 @@ document.addEventListener('DOMContentLoaded', () => {
       showStatus('Connecting to Figma API...', 'info');
 
       try {
-        // Get checkbox value for header auth
-        const useHeaderAuth = document.getElementById('useHeaderAuth').checked;
+        // Get proxy checkbox value
+        const useProxy = document.getElementById('useProxy').checked;
         
         const response = await fetchFigmaDesign(
           figmaData.fileKey,
           figmaData.nodeId,
           figmaToken,
-          useHeaderAuth
+          false, // useHeaderAuth is deprecated, always use headers
+          useProxy
         );
         if (response) {
           // Handle new response structure
@@ -1687,11 +1688,34 @@ document.addEventListener('DOMContentLoaded', () => {
         // https://www.figma.com/file/ABC123/File-Name?node-id=1-2
         // https://www.figma.com/design/ABC123/File-Name?node-id=1-2
         // https://www.figma.com/file/ABC123/File-Name
+        // https://api.figma.com/file/ABC123 (API URL format)
+        // https://api.figma.com/v1/files/ABC123 (API URL format)
 
         const urlObj = new URL(url);
         const pathParts = urlObj.pathname.split('/');
 
-        // Check for both /file/ and /design/ formats
+        // Check for API URL format
+        if (urlObj.hostname === 'api.figma.com') {
+          // Handle both /file/ABC123 and /v1/files/ABC123 formats
+          let fileKey = null;
+          
+          if (pathParts[1] === 'file' && pathParts[2]) {
+            fileKey = pathParts[2];
+          } else if (pathParts[1] === 'v1' && pathParts[2] === 'files' && pathParts[3]) {
+            fileKey = pathParts[3];
+          }
+          
+          if (fileKey) {
+            // Extract node ID from query params if present
+            let nodeId = urlObj.searchParams.get('node-id') || urlObj.searchParams.get('ids');
+            if (nodeId) {
+              nodeId = nodeId.replace(':', '-');
+            }
+            return { fileKey, nodeId };
+          }
+        }
+
+        // Check for regular Figma web URLs (/file/ and /design/ formats)
         if (
           (pathParts[1] !== 'file' && pathParts[1] !== 'design') ||
           !pathParts[2]
@@ -1716,29 +1740,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Fetch Figma design using API (via server proxy)
-    async function fetchFigmaDesign(fileKey, nodeId, token, useHeaderAuth = false) {
+    async function fetchFigmaDesign(fileKey, nodeId, token, useHeaderAuth = false, useProxy = false) {
       try {
+        // Always send token via header
         const headers = {
-          'Content-Type': 'application/json',
+          'X-Figma-Token': token
         };
         
-        const body = {
+        // Build query parameters
+        const params = new URLSearchParams({
           fileKey: fileKey,
-          nodeId: nodeId,
-          useHeaderAuth: useHeaderAuth
-        };
+          useProxy: useProxy
+        });
         
-        // Add token to appropriate location based on checkbox
-        if (useHeaderAuth) {
-          headers['X-Figma-Token'] = token;
-        } else {
-          body.token = token;
+        // Add nodeId if present
+        if (nodeId) {
+          params.append('nodeId', nodeId);
         }
         
-        const response = await fetch('/figma/fetch', {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify(body),
+        const response = await fetch(`/figma/fetch?${params.toString()}`, {
+          method: 'GET',
+          headers: headers
         });
 
         if (!response.ok) {

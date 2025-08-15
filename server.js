@@ -11,12 +11,17 @@ import { dirname } from 'path';
 import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import Tesseract from 'tesseract.js';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
 const PORT = 3000;
+
+// Proxy configuration for corporate network
+const PROXY_URL = 'http://proxy.jpmchase.net:8443';
+const proxyAgent = new HttpsProxyAgent(PROXY_URL);
 
 app.use(cors());
 app.use(express.static('public'));
@@ -42,17 +47,17 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-// Figma API proxy endpoint - supports both body and header token authentication
-app.post('/figma/fetch', async (req, res) => {
+// Figma API proxy endpoint - token sent via header only
+app.get('/figma/fetch', async (req, res) => {
   try {
-    const { fileKey, nodeId, token: bodyToken, useHeaderAuth = false } = req.body;
+    const { fileKey, nodeId, useProxy } = req.query;
     
-    // Check for token in header or body
-    const token = useHeaderAuth ? req.headers['x-figma-token'] : bodyToken;
+    // Token is always sent via header
+    const token = req.headers['x-figma-token'];
     
     if (!fileKey || !token) {
       return res.status(400).json({ 
-        error: 'Missing fileKey or token. Token can be sent in body or X-Figma-Token header' 
+        error: 'Missing fileKey or token. Token must be sent via X-Figma-Token header' 
       });
     }
     
@@ -70,11 +75,23 @@ app.post('/figma/fetch', async (req, res) => {
       url = `https://api.figma.com/v1/files/${fileKey}`;
     }
     
-    const response = await fetch(url, {
+    // Prepare fetch options
+    const fetchOptions = {
       headers: {
         'X-Figma-Token': token
       }
-    });
+    };
+    
+    // Only use proxy if requested (convert string to boolean)
+    if (useProxy === 'true') {
+      console.log(`Fetching Figma design via proxy: ${PROXY_URL}`);
+      fetchOptions.agent = proxyAgent;
+    } else {
+      console.log(`Fetching Figma design directly (no proxy)`);
+    }
+    console.log(`Request URL: ${url}`);
+    
+    const response = await fetch(url, fetchOptions);
     
     if (!response.ok) {
       const error = await response.json();

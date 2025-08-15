@@ -150,6 +150,36 @@ textarea:focus {
     font-size: 14px;
 }
 
+.figma-method-tabs {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #e0e0e0;
+}
+
+.method-tab {
+    flex: 1;
+    padding: 10px;
+    background: transparent;
+    color: #666;
+    border: none;
+    border-bottom: 2px solid transparent;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.method-tab:hover {
+    background: #f5f5f5;
+}
+
+.method-tab.active {
+    color: #3498db;
+    border-bottom-color: #3498db;
+    background: #f0f8ff;
+}
+
 .fetch-btn {
     width: 100%;
     padding: 12px;

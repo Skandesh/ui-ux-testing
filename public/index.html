@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>UI/UX Testing - Pixel Perfect Comparison</title>
     <link rel="stylesheet" href="style.css">
+    <script src="figma-utils.js"></script>
 </head>
 <body>
     <div class="container">
@@ -24,7 +25,12 @@
                     <div class="upload-grid">
                         <div class="upload-box">
                             <h3>Figma Design</h3>
-                            <div class="figma-input-section">
+                            <div class="figma-method-tabs">
+                                <button type="button" class="method-tab active" data-method="api">Fetch via API</button>
+                                <button type="button" class="method-tab" data-method="paste">Paste JSON</button>
+                            </div>
+                            
+                            <div class="figma-input-section" id="figmaApiSection">
                                 <div class="input-group">
                                     <label for="figmaLink">Figma Link</label>
                                     <input type="url" id="figmaLink" placeholder="https://www.figma.com/file/..." />
@@ -48,6 +54,16 @@
                                 </div>
                                 <button type="button" id="fetchFigmaBtn" class="fetch-btn">Fetch Design</button>
                                 <div id="figmaStatus" class="status-message"></div>
+                            </div>
+                            
+                            <div class="figma-input-section" id="figmaPasteSection" style="display: none;">
+                                <div class="input-group">
+                                    <label for="figmaJsonPaste">Paste Figma JSON</label>
+                                    <textarea id="figmaJsonPaste" placeholder="Paste the Figma API JSON response here..." rows="10" style="width: 100%; font-family: monospace; font-size: 12px;"></textarea>
+                                    <small>Steps: 1) Open Figma API URL in authenticated browser 2) Copy the JSON response 3) Paste here</small>
+                                </div>
+                                <button type="button" id="parseFigmaJsonBtn" class="fetch-btn">Parse JSON</button>
+                                <div id="figmaPasteStatus" class="status-message"></div>
                             </div>
                             <div class="ai-input-section">
                                 <h4>AI Enhancement (Optional)</h4>

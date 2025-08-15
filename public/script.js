@@ -64,6 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const figmaLinkInput = document.getElementById('figmaLink');
   const figmaTokenInput = document.getElementById('figmaToken');
   const fetchFigmaBtn = document.getElementById('fetchFigmaBtn');
+  const parseFigmaJsonBtn = document.getElementById('parseFigmaJsonBtn');
   const rawAnalyzeBtn = document.getElementById('rawAnalyzeBtn');
 
   // Field detection elements
@@ -91,7 +92,88 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Fetch Figma design
+  // Handle method tab switching
+  const methodTabs = document.querySelectorAll('.method-tab');
+  const figmaApiSection = document.getElementById('figmaApiSection');
+  const figmaPasteSection = document.getElementById('figmaPasteSection');
+  
+  methodTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      methodTabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      
+      if (tab.dataset.method === 'api') {
+        figmaApiSection.style.display = 'block';
+        figmaPasteSection.style.display = 'none';
+      } else {
+        figmaApiSection.style.display = 'none';
+        figmaPasteSection.style.display = 'block';
+      }
+    });
+  });
+  
+  // Parse pasted JSON (extractFigmaProperties is loaded from figma-utils.js)
+  if (parseFigmaJsonBtn) {
+    parseFigmaJsonBtn.addEventListener('click', () => {
+      const jsonText = document.getElementById('figmaJsonPaste').value.trim();
+      const statusDiv = document.getElementById('figmaPasteStatus');
+      
+      if (!jsonText) {
+        statusDiv.className = 'status-message error';
+        statusDiv.textContent = 'Please paste the Figma JSON';
+        return;
+      }
+      
+      try {
+        const parsedData = JSON.parse(jsonText);
+        
+        // Extract properties if it's raw Figma API response
+        let processedData;
+        if (parsedData.document) {
+          console.log('Processing raw Figma API response...');
+          const properties = extractFigmaProperties(parsedData.document);
+          processedData = {
+            design: parsedData.document,
+            properties: properties,
+            formFields: properties.formFields || []
+          };
+        } else if (parsedData.nodes) {
+          // Handle nodes response
+          const firstNodeKey = Object.keys(parsedData.nodes)[0];
+          const firstNode = parsedData.nodes[firstNodeKey];
+          const nodeData = firstNode.document || firstNode;
+          const properties = extractFigmaProperties(nodeData);
+          processedData = {
+            design: nodeData,
+            properties: properties,
+            formFields: properties.formFields || []
+          };
+        } else {
+          // Assume it's already processed
+          processedData = parsedData;
+        }
+        
+        fetchedFigmaJSON = processedData;
+        parsedJSON = fetchedFigmaJSON;
+        
+        // Display preview
+        const jsonPreview = document.getElementById('jsonPreview');
+        if (jsonPreview) {
+          displayJSONPreview(fetchedFigmaJSON);
+        }
+        
+        statusDiv.className = 'status-message success';
+        statusDiv.textContent = `Successfully parsed JSON! Found ${processedData.formFields?.length || 0} form fields`;
+        
+      } catch (error) {
+        console.error('JSON parse error:', error);
+        statusDiv.className = 'status-message error';
+        statusDiv.textContent = 'Invalid JSON format. Please check and try again.';
+      }
+    });
+  }
+
+  // Fetch Figma design via API
   if (fetchFigmaBtn) {
     fetchFigmaBtn.addEventListener('click', async () => {
       const figmaLink = figmaLinkInput.value.trim();

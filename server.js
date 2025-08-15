@@ -19,9 +19,11 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = 3000;
 
-// Proxy configuration for corporate network
 const PROXY_URL = 'http://proxy.jpmchase.net:8443';
-const proxyAgent = new HttpsProxyAgent(PROXY_URL);
+const proxyAgent = new HttpsProxyAgent(PROXY_URL, {
+  timeout: 10000,
+  rejectUnauthorized: false
+});
 
 app.use(cors());
 app.use(express.static('public'));
@@ -54,6 +56,7 @@ app.get('/figma/fetch', async (req, res) => {
     
     // Token is always sent via header
     const token = req.headers['x-figma-token'];
+    const cookie = req.headers['x-figma-cookie'];
     
     if (!fileKey || !token) {
       return res.status(400).json({ 
@@ -78,9 +81,15 @@ app.get('/figma/fetch', async (req, res) => {
     // Prepare fetch options
     const fetchOptions = {
       headers: {
-        'X-Figma-Token': token
+        'X-Figma-Token': token,
+        'Content-Type': 'application/json'
       }
     };
+    
+    // Add cookie if provided (convert X-Figma-Cookie to Cookie)
+    if (cookie) {
+      fetchOptions.headers['Cookie'] = cookie;
+    }
     
     // Only use proxy if requested (convert string to boolean)
     if (useProxy === 'true') {
@@ -91,7 +100,25 @@ app.get('/figma/fetch', async (req, res) => {
     }
     console.log(`Request URL: ${url}`);
     
-    const response = await fetch(url, fetchOptions);
+    let response;
+    try {
+      response = await fetch(url, fetchOptions);
+    } catch (fetchError) {
+      console.error('Fetch error:', fetchError);
+      
+      if (useProxy === 'true' && fetchError.cause?.code === 'UND_ERR_CONNECT_TIMEOUT') {
+        return res.status(504).json({ 
+          error: 'Proxy connection timeout. Please check if you are on the corporate network or disable proxy.',
+          details: `Could not connect to proxy: ${PROXY_URL}`,
+          suggestion: 'Try unchecking "Use corporate proxy" if you are not on the corporate network.'
+        });
+      }
+      
+      return res.status(500).json({ 
+        error: 'Failed to connect to Figma API',
+        details: fetchError.message
+      });
+    }
     
     if (!response.ok) {
       const error = await response.json();

@@ -121,15 +121,17 @@ document.addEventListener('DOMContentLoaded', () => {
       showStatus('Connecting to Figma API...', 'info');
 
       try {
-        // Get proxy checkbox value
+        // Get proxy checkbox value and cookie
         const useProxy = document.getElementById('useProxy').checked;
+        const figmaCookie = document.getElementById('figmaCookie').value.trim();
         
         const response = await fetchFigmaDesign(
           figmaData.fileKey,
           figmaData.nodeId,
           figmaToken,
           false, // useHeaderAuth is deprecated, always use headers
-          useProxy
+          useProxy,
+          figmaCookie
         );
         if (response) {
           // Handle new response structure
@@ -1740,12 +1742,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Fetch Figma design using API (via server proxy)
-    async function fetchFigmaDesign(fileKey, nodeId, token, useHeaderAuth = false, useProxy = false) {
+    async function fetchFigmaDesign(fileKey, nodeId, token, useHeaderAuth = false, useProxy = false, cookie = '') {
       try {
         // Always send token via header
         const headers = {
           'X-Figma-Token': token
         };
+        
+        // Add cookie if provided
+        if (cookie) {
+          headers['X-Figma-Cookie'] = cookie;
+        }
         
         // Build query parameters
         const params = new URLSearchParams({
@@ -1765,6 +1772,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!response.ok) {
           const error = await response.json();
+          if (error.suggestion) {
+            throw new Error(`${error.error}\n\n${error.suggestion}`);
+          }
           throw new Error(error.error || 'Failed to fetch Figma design');
         }
 

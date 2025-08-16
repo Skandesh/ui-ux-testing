@@ -8,7 +8,7 @@
     "1:5638": {
       "document" {
         "id": "1:5638",
-        "name": ""Customer,
+        "name": "Customer",
         "type": "FRAME",
         "scrollBehavior": "SCROLLS",
       }

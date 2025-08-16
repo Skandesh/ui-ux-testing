@@ -1,8 +1,19 @@
 {
-  "id": "0:77",
   "name": "Login Screen AI Sample",
-  "type": "FRAME",
-  "scrollBehavior": "SCROLLS",
+  "editorType": "figma",
+  "verison": "243333333333",
+  "role": "Viewer",
+  "linkAccess": "org_view",
+  "nodes": {
+    "1:5638": {
+      "document" {
+        "id": "1:5638",
+        "name": ""Customer,
+        "type": "FRAME",
+        "scrollBehavior": "SCROLLS",
+      }
+    }
+  }
   "children": [
     {
       "id": "0:453",

@@ -5611,27 +5611,68 @@ function hexToRgb(hex) {
 
 // OCR Text Extraction using Tesseract.js
 async function extractAllTextFromScreenshot(screenshotPath) {
+  let worker = null;
   try {
     console.log('Starting OCR text extraction from:', screenshotPath);
     
-    const { data } = await Tesseract.recognize(
-      screenshotPath,
-      'eng',
-      {
+    // Try to create a worker with simplified configuration
+    try {
+      worker = await Tesseract.createWorker({
         logger: m => {
           if (m.status === 'recognizing text') {
             console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
           }
         }
+      });
+      
+      await worker.loadLanguage('eng');
+      await worker.initialize('eng');
+    } catch (workerError) {
+      console.log('Failed to create worker with default settings, trying fallback...');
+      // Fallback to simple recognition without worker
+      const { data } = await Tesseract.recognize(
+        screenshotPath,
+        'eng',
+        {
+          logger: m => {
+            if (m.status === 'recognizing text') {
+              console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
+            }
+          }
+        }
+      );
+      return processOCRData(data);
+    }
+    
+    const { data } = await worker.recognize(screenshotPath);
+    
+    // Terminate the worker after use
+    if (worker) {
+      await worker.terminate();
+    }
+    
+    return processOCRData(data);
+  } catch (error) {
+    console.error('OCR extraction failed:', error);
+    if (worker) {
+      try {
+        await worker.terminate();
+      } catch (e) {
+        console.error('Failed to terminate worker:', e);
       }
-    );
-    
-    // Group words into logical text elements based on lines and proximity
-    const textElements = [];
-    const processedLines = new Set();
-    
-    // Process lines to create complete text elements
-    if (data.lines && data.lines.length > 0) {
+    }
+    return [];
+  }
+}
+
+// Helper function to process OCR data
+function processOCRData(data) {
+  // Group words into logical text elements based on lines and proximity
+  const textElements = [];
+  const processedLines = new Set();
+  
+  // Process lines to create complete text elements
+  if (data.lines && data.lines.length > 0) {
       data.lines.forEach(line => {
         if (line.text && line.text.trim() && !processedLines.has(line.text)) {
           processedLines.add(line.text);
@@ -5782,12 +5823,8 @@ async function extractAllTextFromScreenshot(screenshotPath) {
       lines: data.lines || [],
       paragraphs: data.paragraphs || [],
       words: data.words || [],
-      fullText: data.text
+      fullText: data.text || ''
     };
-  } catch (error) {
-    console.error('OCR extraction error:', error);
-    return { elements: [], lines: [], paragraphs: [], words: [], fullText: '' };
-  }
 }
 
 // Enhanced Figma text extraction with all properties

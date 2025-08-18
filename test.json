@@ -6,15 +6,12 @@
   "linkAccess": "org_view",
   "nodes": {
     "1:5638": {
-      "document" {
+      "document": {
         "id": "1:5638",
         "name": "Customer",
         "type": "FRAME",
         "scrollBehavior": "SCROLLS",
-      }
-    }
-  }
-  "children": [
+          "children": [
     {
       "id": "0:453",
       "name": "Rectangle",
@@ -2449,4 +2446,36 @@
   },
   "effects": [],
   "interactions": []
+
+      }
+      
+    },
+    "components": {
+      "1:3399": {
+        "key": "507676788998",
+        "name": "navigation/ ico_chevron_left",
+        "description": "",
+        "remote": true,
+        "documentationLinks": []
+      }
+    },
+    "componentSets": {
+      "1:3438": {
+        "key": "d41628deb12235aqw",
+        "name": "payment / Spot - Sales",
+        "description": "",
+        "remote": true
+      }
+    },
+    "schemaVersion": 0,
+    "styles": {
+      "1:5178": {
+        "key": "9be17f899",
+        "name": "Text/Regular",
+        "styleType": "FILL",
+        "remote": true,
+        "description": ""
+      }
+    }
+  }
 }

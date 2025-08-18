@@ -5609,39 +5609,43 @@ function hexToRgb(hex) {
   } : null;
 }
 
-// OCR Text Extraction using Tesseract.js
+// OCR Text Extraction using Tesseract.js with local data only (no CDN)
 async function extractAllTextFromScreenshot(screenshotPath) {
   let worker = null;
   try {
     console.log('Starting OCR text extraction from:', screenshotPath);
     
-    // Try to create a worker with simplified configuration
+    // Create worker with strict local-only configuration
     try {
+      // Use file:// protocol to ensure local file access only
+      const tessdataPath = path.join(process.cwd(), 'tess');
+      
       worker = await Tesseract.createWorker({
-        logger: m => {
-          if (m.status === 'recognizing text') {
-            console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
-          }
-        }
+        langPath: tessdataPath,  // Use local tessdata directory
+        gzip: false,              // Use uncompressed local files
+        cacheMethod: 'none',      // No caching to avoid stale data
+        // Explicitly set worker and core paths to use local node_modules
+        workerPath: path.join(process.cwd(), 'node_modules', 'tesseract.js', 'dist', 'worker.min.js'),
+        corePath: path.join(process.cwd(), 'node_modules', 'tesseract.js-core', 'tesseract-core.wasm.js'),
       });
       
+      // Load and initialize with local eng.traineddata
       await worker.loadLanguage('eng');
       await worker.initialize('eng');
+      console.log('OCR worker initialized successfully with local data from tessdata/');
     } catch (workerError) {
-      console.log('Failed to create worker with default settings, trying fallback...');
-      // Fallback to simple recognition without worker
-      const { data } = await Tesseract.recognize(
-        screenshotPath,
-        'eng',
-        {
-          logger: m => {
-            if (m.status === 'recognizing text') {
-              console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
-            }
-          }
-        }
-      );
-      return processOCRData(data);
+      console.error('Failed to create OCR worker:', workerError.message);
+      console.log('Please ensure tessdata/eng.traineddata exists');
+      
+      // If worker fails, return empty result rather than trying CDN
+      return {
+        elements: [],
+        lines: [],
+        paragraphs: [],
+        words: [],
+        fullText: '',
+        error: 'OCR initialization failed. Please check tessdata/eng.traineddata exists.'
+      };
     }
     
     const { data } = await worker.recognize(screenshotPath);

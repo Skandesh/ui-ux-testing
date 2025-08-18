@@ -482,7 +482,27 @@ async function validateDimensions(screenshotPath, figmaJSON) {
     
     // Calculate aspect ratio difference
     const aspectRatioDiff = Math.abs(figmaAspectRatio - screenshotAspectRatio);
-    const aspectRatioTolerance = 0.05; // 5% tolerance
+    
+    // Intelligent tolerance based on design type
+    let aspectRatioTolerance = 0.15; // Default 15% tolerance
+    
+    // Check if this is a scrollable/long design (height > 2x width)
+    const isScrollableDesign = figmaBounds.height > figmaBounds.width * 2;
+    
+    // Check if this is likely a mobile design
+    const isMobileDesign = figmaBounds.width <= 500;
+    
+    if (isScrollableDesign && isMobileDesign) {
+      // For tall mobile scrollable designs, use relaxed tolerance
+      aspectRatioTolerance = 0.35; // 35% tolerance
+      console.log('Detected scrollable mobile design - using relaxed tolerance');
+    } else if (isScrollableDesign) {
+      // For other scrollable designs
+      aspectRatioTolerance = 0.25; // 25% tolerance
+    } else if (isMobileDesign) {
+      // For standard mobile designs
+      aspectRatioTolerance = 0.10; // 10% tolerance
+    }
     
     const validation = {
       isValid: aspectRatioDiff <= aspectRatioTolerance,
@@ -494,13 +514,18 @@ async function validateDimensions(screenshotPath, figmaJSON) {
       figmaAspectRatio: figmaAspectRatio.toFixed(3),
       screenshotAspectRatio: screenshotAspectRatio.toFixed(3),
       aspectRatioDifference: aspectRatioDiff.toFixed(3),
+      tolerance: aspectRatioTolerance,
+      designType: isScrollableDesign ? 'scrollable' : 'standard',
       message: ''
     };
     
     if (!validation.isValid) {
-      validation.message = `Aspect ratio mismatch: Figma (${validation.figmaAspectRatio}) vs Screenshot (${validation.screenshotAspectRatio}). Please upload a screenshot with matching aspect ratio.`;
+      validation.message = `Aspect ratio mismatch exceeds ${(aspectRatioTolerance * 100).toFixed(0)}% tolerance: Figma (${validation.figmaAspectRatio}) vs Screenshot (${validation.screenshotAspectRatio}). For best results, capture screenshot at ${figmaBounds.width}px width.`;
+      // Still proceed but with warning
+      validation.warning = true;
+      validation.isValid = true; // Allow comparison to proceed with warning
     } else {
-      validation.message = 'Dimensions validated successfully';
+      validation.message = `Dimensions validated successfully (within ${(aspectRatioTolerance * 100).toFixed(0)}% tolerance)`;
     }
     
     return validation;

@@ -110,6 +110,14 @@
                                         <input type="text" id="azureDeployment" placeholder="gpt-4-vision" />
                                         <small>Your GPT-4 Vision deployment name</small>
                                     </div>
+                                    <div class="input-group">
+                                        <label for="azureCertFile">Certificate File (.pem) - Optional</label>
+                                        <input type="file" id="azureCertFile" accept=".pem,.crt,.cer" />
+                                        <small>Upload certificate file if required for authentication</small>
+                                    </div>
+                                    <div class="cert-note">
+                                        <span>ℹ️</span> For server-side certificate: Place your .pem file on the server and set AZURE_CERT_PATH in .env
+                                    </div>
                                 </div>
                             </div>
                             <div class="json-preview" id="jsonPreview"></div>

@@ -417,7 +417,29 @@ function extractFigmaProperties(json) {
     }
   }
   
-  traverseNode(json);
+  // Handle different JSON formats - same logic as server.js
+  if (json.nodes) {
+    // Direct pasted JSON format - traverse all nodes
+    for (const nodeId in json.nodes) {
+      const node = json.nodes[nodeId];
+      if (node.document) {
+        traverseNode(node.document);
+      }
+    }
+  } else if (json.document) {
+    // Figma API response format
+    if (json.document.children) {
+      json.document.children.forEach(child => traverseNode(child));
+    } else {
+      traverseNode(json.document);
+    }
+  } else if (json.children) {
+    // Direct frame/node format
+    json.children.forEach(child => traverseNode(child));
+  } else {
+    // Fallback - try to traverse the object directly
+    traverseNode(json);
+  }
   
   const allTextNodes = allNodes.filter(n => n.type === 'TEXT');
   const allChildNodes = allNodes.map(n => n);

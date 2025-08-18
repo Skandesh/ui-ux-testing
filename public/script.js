@@ -158,32 +158,31 @@ document.addEventListener('DOMContentLoaded', () => {
         const parsedData = JSON.parse(jsonText);
         console.log('JSON parsed successfully:', parsedData);
         
-        // Extract properties if it's raw Figma API response
+        // Extract properties - pass the whole JSON to extractFigmaProperties
+        // which now handles different formats internally
         let processedData;
-        if (parsedData.document) {
-          console.log('Processing raw Figma API response with document field...');
-          const properties = extractFigmaProperties(parsedData.document);
-          processedData = {
-            design: parsedData.document,
-            properties: properties,
-            formFields: properties.formFields || []
-          };
-        } else if (parsedData.nodes) {
-          console.log('Processing Figma nodes response...');
+        console.log('Processing Figma JSON structure...');
+        const properties = extractFigmaProperties(parsedData);
+        
+        // Determine what to use as the design data
+        let designData;
+        if (parsedData.nodes) {
+          // For pasted JSON with nodes, use the first node's document
           const firstNodeKey = Object.keys(parsedData.nodes)[0];
-          const firstNode = parsedData.nodes[firstNodeKey];
-          const nodeData = firstNode.document || firstNode;
-          console.log('Extracting properties from node:', firstNodeKey);
-          const properties = extractFigmaProperties(nodeData);
-          processedData = {
-            design: nodeData,
-            properties: properties,
-            formFields: properties.formFields || []
-          };
+          designData = parsedData.nodes[firstNodeKey].document || parsedData;
+        } else if (parsedData.document) {
+          // For API response, use document
+          designData = parsedData.document;
         } else {
-          console.log('Using parsed data as-is (already processed format)');
-          processedData = parsedData;
+          // Fallback to the whole data
+          designData = parsedData;
         }
+        
+        processedData = {
+          design: designData,
+          properties: properties,
+          formFields: properties.formFields || []
+        };
         
         fetchedFigmaJSON = processedData;
         parsedJSON = fetchedFigmaJSON;
@@ -373,9 +372,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const azureKey = document.getElementById('azureApiKey').value;
             const azureEndpoint = document.getElementById('azureEndpoint').value;
             const azureDeployment = document.getElementById('azureDeployment').value;
+            const azureCertFile = document.getElementById('azureCertFile').files[0];
+            
             if (azureKey) formData.append('azureApiKey', azureKey);
             if (azureEndpoint) formData.append('azureEndpoint', azureEndpoint);
             if (azureDeployment) formData.append('azureDeployment', azureDeployment);
+            if (azureCertFile) formData.append('azureCert', azureCertFile);
             formData.append('apiMode', 'azure');
           } else {
             // Using environment variables from server
@@ -1409,7 +1411,8 @@ document.addEventListener('DOMContentLoaded', () => {
       html += '</details>';
 
       try {
-        const properties = extractDesignProperties(json);
+        // Use the properties that were already extracted by extractFigmaProperties
+        const properties = json.properties || extractDesignProperties(json);
         console.log('Extracted properties:', properties);
 
         // Add extracted properties display
@@ -1430,23 +1433,44 @@ document.addEventListener('DOMContentLoaded', () => {
           }
           html += '<br>';
         }
+        
+        // Handle typography display - check for array format from extractFigmaProperties
         if (properties.typography) {
-          // Check if typography is an array (from server) or object (from client extraction)
-          if (Array.isArray(properties.typography)) {
+          if (Array.isArray(properties.typography) && properties.typography.length > 0) {
             html += '<strong>Typography:</strong><br>';
-            properties.typography.forEach((typo, index) => {
+            // Show unique font/size combinations
+            const uniqueTypo = {};
+            properties.typography.forEach(typo => {
+              const key = `${typo.fontFamily || 'Unknown'}_${typo.fontSize || 'Unknown'}`;
+              if (!uniqueTypo[key]) {
+                uniqueTypo[key] = typo;
+              }
+            });
+            
+            Object.values(uniqueTypo).forEach((typo) => {
               const fontFamily = typo.fontFamily || 'Unknown';
               const fontSize = typo.fontSize || 'Unknown';
               html += `<span style="margin-left: 10px;">• ${fontFamily} ${fontSize}px</span><br>`;
             });
-          } else {
-            // Handle object format
+          } else if (typeof properties.typography === 'object' && !Array.isArray(properties.typography)) {
+            // Handle single object format (fallback)
             html += `<strong>Font:</strong> ${
               properties.typography.fontFamily || 'Not specified'
             }<br>`;
             html += `<strong>Size:</strong> ${
               properties.typography.fontSize || 'Not specified'
             }<br>`;
+          }
+        }
+        
+        // Display form fields if available
+        if (properties.formFields && properties.formFields.length > 0) {
+          html += `<strong>Form Fields:</strong> ${properties.formFields.length} detected<br>`;
+          properties.formFields.slice(0, 3).forEach(field => {
+            html += `<span style="margin-left: 10px;">• ${field.name} (${field.type})</span><br>`;
+          });
+          if (properties.formFields.length > 3) {
+            html += `<span style="margin-left: 10px;">+${properties.formFields.length - 3} more</span><br>`;
           }
         }
       } catch (error) {

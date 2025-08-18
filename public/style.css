@@ -85,6 +85,23 @@ h1 {
     color: #4CAF50;
 }
 
+.cert-note {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 5px;
+    color: #856404;
+    font-size: 13px;
+    margin-top: 10px;
+}
+
+.cert-note span {
+    font-size: 16px;
+}
+
 /* Upload Section */
 .upload-section {
     background: white;

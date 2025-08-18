@@ -13,6 +13,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import Tesseract from 'tesseract.js';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import dotenv from 'dotenv';
+import https from 'https';
 
 // Load environment variables
 dotenv.config();
@@ -276,7 +277,8 @@ app.post('/analyze', upload.fields([
 
 // AI-powered analysis endpoint using OpenAI Vision
 app.post('/analyze-with-ai', upload.fields([
-  { name: 'screenshot', maxCount: 1 }
+  { name: 'screenshot', maxCount: 1 },
+  { name: 'azureCert', maxCount: 1 }
 ]), async (req, res) => {
   try {
     const figmaJSON = JSON.parse(req.body.figmaJSON);
@@ -294,6 +296,13 @@ app.post('/analyze-with-ai', upload.fields([
       process.env.TEMP_AZURE_ENDPOINT = req.body.azureEndpoint;
       process.env.TEMP_AZURE_DEPLOYMENT = req.body.azureDeployment;
       process.env.OPENAI_MODE = 'azure';
+      
+      // Handle uploaded certificate
+      if (req.files.azureCert && req.files.azureCert[0]) {
+        const certPath = req.files.azureCert[0].path;
+        process.env.TEMP_AZURE_CERT_PATH = certPath;
+        console.log('Using uploaded Azure certificate:', certPath);
+      }
     } else if (apiMode === 'env') {
       // Use environment variables
       apiKey = process.env.OPENAI_API_KEY || process.env.AZURE_OPENAI_API_KEY;
@@ -554,12 +563,32 @@ async function analyzeWithOpenAI(screenshotPath, figmaProperties, apiKey) {
         throw new Error('Azure OpenAI configuration is incomplete. Please check your environment variables.');
       }
       
-      openai = new OpenAI({
+      // Configure Azure OpenAI with certificate if provided
+      const azureConfig = {
         apiKey: azureApiKey,
         baseURL: `${azureEndpoint}/openai/deployments/${azureDeployment}`,
         defaultQuery: { 'api-version': azureApiVersion },
         defaultHeaders: { 'api-key': azureApiKey }
-      });
+      };
+      
+      // Add certificate support if path is provided
+      const certPath = process.env.TEMP_AZURE_CERT_PATH || process.env.AZURE_CERT_PATH;
+      if (certPath && fs.existsSync(certPath)) {
+        console.log('Using Azure certificate:', certPath);
+        const cert = fs.readFileSync(certPath);
+        const certPassphrase = process.env.AZURE_CERT_PASSPHRASE;
+        
+        // Create custom HTTPS agent with certificate
+        const httpsAgent = new https.Agent({
+          cert: cert,
+          passphrase: certPassphrase,
+          rejectUnauthorized: false // Set to true in production
+        });
+        
+        azureConfig.httpAgent = httpsAgent;
+      }
+      
+      openai = new OpenAI(azureConfig);
     } else {
       // Standard OpenAI configuration
       const openaiApiKey = apiKey || process.env.OPENAI_API_KEY;
@@ -4682,12 +4711,32 @@ app.post('/detect-fields', upload.single('image'), async (req, res) => {
       const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
       const azureApiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-12-01-preview';
       
-      openai = new OpenAI({
+      // Configure Azure OpenAI with certificate if provided
+      const azureConfig = {
         apiKey: effectiveApiKey,
         baseURL: `${azureEndpoint}/openai/deployments/${azureDeployment}`,
         defaultQuery: { 'api-version': azureApiVersion },
         defaultHeaders: { 'api-key': effectiveApiKey }
-      });
+      };
+      
+      // Add certificate support if path is provided
+      const certPath = process.env.AZURE_CERT_PATH;
+      if (certPath && fs.existsSync(certPath)) {
+        console.log('Using Azure certificate for field detection:', certPath);
+        const cert = fs.readFileSync(certPath);
+        const certPassphrase = process.env.AZURE_CERT_PASSPHRASE;
+        
+        // Create custom HTTPS agent with certificate
+        const httpsAgent = new https.Agent({
+          cert: cert,
+          passphrase: certPassphrase,
+          rejectUnauthorized: false // Set to true in production
+        });
+        
+        azureConfig.httpAgent = httpsAgent;
+      }
+      
+      openai = new OpenAI(azureConfig);
     } else {
       openai = new OpenAI({ 
         apiKey: effectiveApiKey,

@@ -5615,37 +5615,79 @@ async function extractAllTextFromScreenshot(screenshotPath) {
   try {
     console.log('Starting OCR text extraction from:', screenshotPath);
     
-    // Create worker with strict local-only configuration
-    try {
-      // Use file:// protocol to ensure local file access only
-      const tessdataPath = path.join(process.cwd(), 'tess');
-      
-      worker = await Tesseract.createWorker({
-        langPath: tessdataPath,  // Use local tessdata directory
-        gzip: false,              // Use uncompressed local files
-        cacheMethod: 'none',      // No caching to avoid stale data
-        // Explicitly set worker and core paths to use local node_modules
-        workerPath: path.join(process.cwd(), 'node_modules', 'tesseract.js', 'dist', 'worker.min.js'),
-        corePath: path.join(process.cwd(), 'node_modules', 'tesseract.js-core', 'tesseract-core.wasm.js'),
-      });
-      
-      // Load and initialize with local eng.traineddata
-      await worker.loadLanguage('eng');
-      await worker.initialize('eng');
-      console.log('OCR worker initialized successfully with local data from tessdata/');
-    } catch (workerError) {
-      console.error('Failed to create OCR worker:', workerError.message);
-      console.log('Please ensure tessdata/eng.traineddata exists');
-      
-      // If worker fails, return empty result rather than trying CDN
+    // Debug: Check current working directory and tessdata path
+    const cwd = process.cwd();
+    const tessdataPath = path.join(cwd, 'tessdata');
+    const engDataPath = path.join(tessdataPath, 'eng.traineddata');
+    
+    console.log('Current working directory:', cwd);
+    console.log('Tessdata path:', tessdataPath);
+    console.log('Checking for eng.traineddata at:', engDataPath);
+    
+    // Verify the file exists
+    if (!fs.existsSync(engDataPath)) {
+      console.error('ERROR: eng.traineddata not found at:', engDataPath);
       return {
         elements: [],
         lines: [],
         paragraphs: [],
         words: [],
         fullText: '',
-        error: 'OCR initialization failed. Please check tessdata/eng.traineddata exists.'
+        error: `eng.traineddata not found at ${engDataPath}`
       };
+    }
+    
+    console.log('eng.traineddata found, size:', fs.statSync(engDataPath).size, 'bytes');
+    
+    // Try simplified worker creation first
+    try {
+      console.log('Attempting simplified worker creation...');
+      
+      // Method 1: Simplest approach with just options
+      // Try with file:// protocol for absolute path
+      const fileProtocolPath = `file://${tessdataPath}`;
+      console.log('Using langPath:', fileProtocolPath);
+      
+      worker = await Tesseract.createWorker({
+        langPath: fileProtocolPath,
+        gzip: false,
+        logger: function(m) { console.log('Tesseract:', m.status); }
+      });
+      
+      console.log('Worker created, loading language...');
+      await worker.loadLanguage('eng');
+      console.log('Language loaded, initializing...');
+      await worker.initialize('eng');
+      console.log('OCR worker initialized successfully');
+      
+    } catch (workerError) {
+      console.error('Worker creation failed:', workerError);
+      console.error('Full error stack:', workerError.stack);
+      
+      // Try Method 2: Direct recognize without worker
+      console.log('Attempting direct recognition without worker...');
+      try {
+        const { data } = await Tesseract.recognize(
+          screenshotPath,
+          'eng',
+          {
+            langPath: tessdataPath,
+            gzip: false
+          }
+        );
+        console.log('Direct recognition successful');
+        return processOCRData(data);
+      } catch (directError) {
+        console.error('Direct recognition also failed:', directError.message);
+        return {
+          elements: [],
+          lines: [],
+          paragraphs: [],
+          words: [],
+          fullText: '',
+          error: 'All OCR methods failed. Check console for details.'
+        };
+      }
     }
     
     const { data } = await worker.recognize(screenshotPath);

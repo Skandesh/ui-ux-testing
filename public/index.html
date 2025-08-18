@@ -67,10 +67,49 @@
                             </div>
                             <div class="ai-input-section">
                                 <h4>AI Enhancement (Optional)</h4>
-                                <div class="input-group">
-                                    <label for="openaiApiKey">OpenAI API Key</label>
-                                    <input type="password" id="openaiApiKey" placeholder="sk-..." />
-                                    <small>Optional: Enable AI-powered analysis with GPT-4 Vision</small>
+                                <div class="api-mode-tabs">
+                                    <button type="button" class="api-mode-tab active" data-mode="env">Use Environment</button>
+                                    <button type="button" class="api-mode-tab" data-mode="openai">OpenAI Direct</button>
+                                    <button type="button" class="api-mode-tab" data-mode="azure">Azure OpenAI</button>
+                                </div>
+                                
+                                <div class="api-config-section" id="envConfigSection">
+                                    <div class="env-status">
+                                        <span class="status-icon">✓</span>
+                                        <span>Using API keys from server environment (.env file)</span>
+                                    </div>
+                                    <small>API keys are configured on the server. No additional input needed.</small>
+                                </div>
+                                
+                                <div class="api-config-section" id="openaiConfigSection" style="display: none;">
+                                    <div class="input-group">
+                                        <label for="openaiApiKey">OpenAI API Key</label>
+                                        <input type="password" id="openaiApiKey" placeholder="sk-..." />
+                                        <small>Your OpenAI API key for GPT-4 Vision</small>
+                                    </div>
+                                    <div class="input-group">
+                                        <label for="openaiEndpoint">API Endpoint (Optional)</label>
+                                        <input type="url" id="openaiEndpoint" placeholder="https://api.openai.com/v1" />
+                                        <small>Leave empty for default OpenAI endpoint</small>
+                                    </div>
+                                </div>
+                                
+                                <div class="api-config-section" id="azureConfigSection" style="display: none;">
+                                    <div class="input-group">
+                                        <label for="azureApiKey">Azure API Key</label>
+                                        <input type="password" id="azureApiKey" placeholder="Your Azure OpenAI API key" />
+                                        <small>API key from Azure OpenAI resource</small>
+                                    </div>
+                                    <div class="input-group">
+                                        <label for="azureEndpoint">Azure Endpoint</label>
+                                        <input type="url" id="azureEndpoint" placeholder="https://your-resource.openai.azure.com" />
+                                        <small>Your Azure OpenAI resource endpoint</small>
+                                    </div>
+                                    <div class="input-group">
+                                        <label for="azureDeployment">Deployment Name</label>
+                                        <input type="text" id="azureDeployment" placeholder="gpt-4-vision" />
+                                        <small>Your GPT-4 Vision deployment name</small>
+                                    </div>
                                 </div>
                             </div>
                             <div class="json-preview" id="jsonPreview"></div>
@@ -107,7 +146,8 @@
                     </div>
                     <div class="input-group">
                         <label for="detectionApiKey">OpenAI API Key</label>
-                        <input type="password" id="detectionApiKey" placeholder="sk-..." />
+                        <input type="password" id="detectionApiKey" placeholder="sk-... (or leave empty to use server config)" />
+                        <small>Leave empty to use server-configured API key from .env</small>
                     </div>
                     <button id="detectFieldsBtn" class="detect-btn">Detect Fields</button>
                 </div>

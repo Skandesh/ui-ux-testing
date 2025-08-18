@@ -92,6 +92,35 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Handle API mode tab switching
+  const apiModeTabs = document.querySelectorAll('.api-mode-tab');
+  const envConfigSection = document.getElementById('envConfigSection');
+  const openaiConfigSection = document.getElementById('openaiConfigSection');
+  const azureConfigSection = document.getElementById('azureConfigSection');
+  
+  apiModeTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      // Remove active from all tabs
+      apiModeTabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      
+      // Hide all sections
+      if (envConfigSection) envConfigSection.style.display = 'none';
+      if (openaiConfigSection) openaiConfigSection.style.display = 'none';
+      if (azureConfigSection) azureConfigSection.style.display = 'none';
+      
+      // Show selected section
+      const mode = tab.dataset.mode;
+      if (mode === 'env' && envConfigSection) {
+        envConfigSection.style.display = 'block';
+      } else if (mode === 'openai' && openaiConfigSection) {
+        openaiConfigSection.style.display = 'block';
+      } else if (mode === 'azure' && azureConfigSection) {
+        azureConfigSection.style.display = 'block';
+      }
+    });
+  });
+
   // Handle method tab switching
   const methodTabs = document.querySelectorAll('.method-tab');
   const figmaApiSection = document.getElementById('figmaApiSection');
@@ -125,12 +154,14 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       
       try {
+        console.log('Attempting to parse JSON...');
         const parsedData = JSON.parse(jsonText);
+        console.log('JSON parsed successfully:', parsedData);
         
         // Extract properties if it's raw Figma API response
         let processedData;
         if (parsedData.document) {
-          console.log('Processing raw Figma API response...');
+          console.log('Processing raw Figma API response with document field...');
           const properties = extractFigmaProperties(parsedData.document);
           processedData = {
             design: parsedData.document,
@@ -138,10 +169,11 @@ document.addEventListener('DOMContentLoaded', () => {
             formFields: properties.formFields || []
           };
         } else if (parsedData.nodes) {
-          // Handle nodes response
+          console.log('Processing Figma nodes response...');
           const firstNodeKey = Object.keys(parsedData.nodes)[0];
           const firstNode = parsedData.nodes[firstNodeKey];
           const nodeData = firstNode.document || firstNode;
+          console.log('Extracting properties from node:', firstNodeKey);
           const properties = extractFigmaProperties(nodeData);
           processedData = {
             design: nodeData,
@@ -149,26 +181,39 @@ document.addEventListener('DOMContentLoaded', () => {
             formFields: properties.formFields || []
           };
         } else {
-          // Assume it's already processed
+          console.log('Using parsed data as-is (already processed format)');
           processedData = parsedData;
         }
         
         fetchedFigmaJSON = processedData;
         parsedJSON = fetchedFigmaJSON;
+        console.log('Processed data stored:', processedData);
         
         // Display preview
         const jsonPreview = document.getElementById('jsonPreview');
         if (jsonPreview) {
-          displayJSONPreview(fetchedFigmaJSON);
+          try {
+            displayJSONPreview(fetchedFigmaJSON);
+          } catch (displayError) {
+            console.error('Error displaying JSON preview:', displayError);
+          }
         }
         
         statusDiv.className = 'status-message success';
         statusDiv.textContent = `Successfully parsed JSON! Found ${processedData.formFields?.length || 0} form fields`;
         
       } catch (error) {
-        console.error('JSON parse error:', error);
+        console.error('Detailed JSON parse error:', error);
+        console.error('Error stack:', error.stack);
         statusDiv.className = 'status-message error';
-        statusDiv.textContent = 'Invalid JSON format. Please check and try again.';
+        
+        if (error.message.includes('JSON')) {
+          statusDiv.textContent = `Invalid JSON format: ${error.message}`;
+        } else if (error.message.includes('extractFigmaProperties')) {
+          statusDiv.textContent = `Error processing Figma data: ${error.message}`;
+        } else {
+          statusDiv.textContent = `Error: ${error.message}`;
+        }
       }
     });
   }
@@ -293,17 +338,49 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        const openaiApiKey = document
-          .getElementById('openaiApiKey')
-          .value.trim();
-        const useAI = openaiApiKey.length > 0;
+        // Check if we should use AI based on active mode
+        const activeApiMode = document.querySelector('.api-mode-tab.active');
+        const apiMode = activeApiMode ? activeApiMode.dataset.mode : 'env';
+        
+        let useAI = false;
+        if (apiMode === 'env') {
+          // Server will determine if API keys are available
+          useAI = true;
+        } else if (apiMode === 'openai') {
+          const openaiKey = document.getElementById('openaiApiKey').value.trim();
+          useAI = openaiKey.length > 0;
+        } else if (apiMode === 'azure') {
+          const azureKey = document.getElementById('azureApiKey').value.trim();
+          useAI = azureKey.length > 0;
+        }
 
         const formData = new FormData();
         formData.append('figmaJSON', JSON.stringify(fetchedFigmaJSON));
         formData.append('screenshot', screenshotInput.files[0]);
 
         if (useAI) {
-          formData.append('openaiApiKey', openaiApiKey);
+          // Get API configuration based on selected mode
+          const activeApiMode = document.querySelector('.api-mode-tab.active');
+          const apiMode = activeApiMode ? activeApiMode.dataset.mode : 'env';
+          
+          if (apiMode === 'openai') {
+            const openaiKey = document.getElementById('openaiApiKey').value;
+            const openaiEndpoint = document.getElementById('openaiEndpoint').value;
+            if (openaiKey) formData.append('openaiApiKey', openaiKey);
+            if (openaiEndpoint) formData.append('openaiEndpoint', openaiEndpoint);
+            formData.append('apiMode', 'openai');
+          } else if (apiMode === 'azure') {
+            const azureKey = document.getElementById('azureApiKey').value;
+            const azureEndpoint = document.getElementById('azureEndpoint').value;
+            const azureDeployment = document.getElementById('azureDeployment').value;
+            if (azureKey) formData.append('azureApiKey', azureKey);
+            if (azureEndpoint) formData.append('azureEndpoint', azureEndpoint);
+            if (azureDeployment) formData.append('azureDeployment', azureDeployment);
+            formData.append('apiMode', 'azure');
+          } else {
+            // Using environment variables from server
+            formData.append('apiMode', 'env');
+          }
         }
 
         // Show loading with appropriate message
@@ -2224,7 +2301,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const formData = new FormData();
         formData.append('image', detectionImage.files[0]);
-        formData.append('openaiApiKey', apiKey);
+        
+        // Only send API key if provided, otherwise server will use .env
+        if (apiKey) {
+          formData.append('openaiApiKey', apiKey);
+        }
 
         // Show loading
         detectionLoading.classList.remove('hidden');

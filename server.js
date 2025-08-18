@@ -12,6 +12,10 @@ import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import Tesseract from 'tesseract.js';
 import { HttpsProxyAgent } from 'https-proxy-agent';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -277,11 +281,27 @@ app.post('/analyze-with-ai', upload.fields([
   try {
     const figmaJSON = JSON.parse(req.body.figmaJSON);
     const screenshotPath = req.files.screenshot[0].path;
-    const openaiApiKey = req.body.openaiApiKey;
     
-    if (!openaiApiKey) {
+    // Handle different API modes
+    const apiMode = req.body.apiMode || 'env';
+    let apiKey = null;
+    
+    if (apiMode === 'openai') {
+      apiKey = req.body.openaiApiKey;
+    } else if (apiMode === 'azure') {
+      apiKey = req.body.azureApiKey;
+      // Store Azure-specific config for later use
+      process.env.TEMP_AZURE_ENDPOINT = req.body.azureEndpoint;
+      process.env.TEMP_AZURE_DEPLOYMENT = req.body.azureDeployment;
+      process.env.OPENAI_MODE = 'azure';
+    } else if (apiMode === 'env') {
+      // Use environment variables
+      apiKey = process.env.OPENAI_API_KEY || process.env.AZURE_OPENAI_API_KEY;
+    }
+    
+    if (!apiKey && apiMode !== 'env') {
       return res.status(400).json({ 
-        error: 'OpenAI API key is required for AI analysis' 
+        error: 'API key is required for AI analysis' 
       });
     }
     
@@ -314,7 +334,7 @@ app.post('/analyze-with-ai', upload.fields([
     const detectedProperties = await analyzeScreenshot(normalizedScreenshotPath);
     
     // Perform AI-powered analysis on normalized screenshot
-    const aiAnalysis = await analyzeWithOpenAI(normalizedScreenshotPath, figmaProperties, openaiApiKey);
+    const aiAnalysis = await analyzeWithOpenAI(normalizedScreenshotPath, figmaProperties, apiKey);
     
     // Perform automatic field comparison if we have form fields
     let fieldComparisonResult = null;
@@ -519,7 +539,41 @@ async function normalizeScreenshotToFigma(screenshotPath, figmaJSON) {
 // Analyze screenshot using OpenAI Vision API
 async function analyzeWithOpenAI(screenshotPath, figmaProperties, apiKey) {
   try {
-    const openai = new OpenAI({ apiKey: apiKey });
+    // Configure OpenAI client based on mode (OpenAI or Azure)
+    let openai;
+    const mode = process.env.OPENAI_MODE || 'openai';
+    
+    if (mode === 'azure') {
+      // Azure OpenAI configuration
+      const azureApiKey = apiKey || process.env.AZURE_OPENAI_API_KEY;
+      const azureEndpoint = process.env.TEMP_AZURE_ENDPOINT || process.env.AZURE_OPENAI_ENDPOINT;
+      const azureDeployment = process.env.TEMP_AZURE_DEPLOYMENT || process.env.AZURE_OPENAI_DEPLOYMENT;
+      const azureApiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-12-01-preview';
+      
+      if (!azureApiKey || !azureEndpoint || !azureDeployment) {
+        throw new Error('Azure OpenAI configuration is incomplete. Please check your environment variables.');
+      }
+      
+      openai = new OpenAI({
+        apiKey: azureApiKey,
+        baseURL: `${azureEndpoint}/openai/deployments/${azureDeployment}`,
+        defaultQuery: { 'api-version': azureApiVersion },
+        defaultHeaders: { 'api-key': azureApiKey }
+      });
+    } else {
+      // Standard OpenAI configuration
+      const openaiApiKey = apiKey || process.env.OPENAI_API_KEY;
+      const openaiEndpoint = process.env.OPENAI_ENDPOINT || 'https://api.openai.com/v1';
+      
+      if (!openaiApiKey) {
+        throw new Error('OpenAI API key is required. Please provide it or set OPENAI_API_KEY in environment.');
+      }
+      
+      openai = new OpenAI({
+        apiKey: openaiApiKey,
+        baseURL: openaiEndpoint
+      });
+    }
     
     // Convert image to base64
     const imageBuffer = fs.readFileSync(screenshotPath);
@@ -590,8 +644,12 @@ The response must start with { and end with }. Must be valid JSON parseable by J
       console.log(`Frame dimensions: ${figmaProperties.dimensions?.width}×${figmaProperties.dimensions?.height}`);
     }
     
+    const model = process.env.OPENAI_MODE === 'azure' 
+      ? process.env.AZURE_OPENAI_DEPLOYMENT 
+      : (process.env.OPENAI_MODEL || "gpt-4o-mini");
+    
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: model,
       messages: [
         {
           role: "system",
@@ -1962,8 +2020,29 @@ function extractFigmaProperties(json) {
     }
   }
   
-  // Start traversal
-  traverseNode(json);
+  // Start traversal - handle different JSON formats
+  if (json.nodes) {
+    // Direct pasted JSON format - traverse all nodes
+    for (const nodeId in json.nodes) {
+      const node = json.nodes[nodeId];
+      if (node.document) {
+        traverseNode(node.document);
+      }
+    }
+  } else if (json.document) {
+    // Figma API response format
+    if (json.document.children) {
+      json.document.children.forEach(child => traverseNode(child));
+    } else {
+      traverseNode(json.document);
+    }
+  } else if (json.children) {
+    // Direct frame/node format
+    json.children.forEach(child => traverseNode(child));
+  } else {
+    // Fallback - try to traverse the object directly
+    traverseNode(json);
+  }
   
   // Post-process form fields: find labels and sort by position
   if (properties.formFields.length > 0) {
@@ -4593,7 +4672,28 @@ app.post('/detect-fields', upload.single('image'), async (req, res) => {
     
     console.log('Starting standalone field detection...');
     
-    const openai = new OpenAI({ apiKey: openaiApiKey });
+    // Configure OpenAI client
+    let openai;
+    const mode = process.env.OPENAI_MODE || 'openai';
+    const effectiveApiKey = openaiApiKey || process.env.OPENAI_API_KEY || process.env.AZURE_OPENAI_API_KEY;
+    
+    if (mode === 'azure') {
+      const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
+      const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
+      const azureApiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-12-01-preview';
+      
+      openai = new OpenAI({
+        apiKey: effectiveApiKey,
+        baseURL: `${azureEndpoint}/openai/deployments/${azureDeployment}`,
+        defaultQuery: { 'api-version': azureApiVersion },
+        defaultHeaders: { 'api-key': effectiveApiKey }
+      });
+    } else {
+      openai = new OpenAI({ 
+        apiKey: effectiveApiKey,
+        baseURL: process.env.OPENAI_ENDPOINT || 'https://api.openai.com/v1'
+      });
+    }
     
     // Convert image to base64
     const imageBuffer = fs.readFileSync(imagePath);
@@ -4675,8 +4775,12 @@ Return ONLY a JSON object with this exact structure:
     
     console.log('Sending image to OpenAI for field detection...');
     
+    const model = process.env.OPENAI_MODE === 'azure' 
+      ? process.env.AZURE_OPENAI_DEPLOYMENT 
+      : (process.env.OPENAI_MODEL || "gpt-4o");
+    
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: model,
       messages: [
         {
           role: "system",
@@ -5679,7 +5783,29 @@ function extractAllTextFromFigma(figmaJSON) {
     }
   }
   
-  traverse(figmaJSON);
+  // Handle different JSON formats
+  if (figmaJSON.nodes) {
+    // Direct pasted JSON format - traverse all nodes
+    for (const nodeId in figmaJSON.nodes) {
+      const node = figmaJSON.nodes[nodeId];
+      if (node.document) {
+        traverse(node.document);
+      }
+    }
+  } else if (figmaJSON.document) {
+    // Figma API response format - traverse document.children
+    if (figmaJSON.document.children) {
+      figmaJSON.document.children.forEach(child => traverse(child));
+    } else {
+      traverse(figmaJSON.document);
+    }
+  } else if (figmaJSON.children) {
+    // Direct frame/node format
+    figmaJSON.children.forEach(child => traverse(child));
+  } else {
+    // Fallback - try to traverse the object directly
+    traverse(figmaJSON);
+  }
   
   console.log(`Extracted ${textElements.length} text elements from Figma`);
   return textElements;

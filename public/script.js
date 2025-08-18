@@ -449,7 +449,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Raw Analysis button handler
     if (rawAnalyzeBtn) {
       rawAnalyzeBtn.addEventListener('click', async () => {
-        if (!fetchedFigmaJSON) {
+        if (!rawFigmaJSON && !fetchedFigmaJSON) {
           alert(
             'Please fetch a Figma design first using the Fetch Design button'
           );
@@ -462,7 +462,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const formData = new FormData();
-        formData.append('figmaJSON', JSON.stringify(fetchedFigmaJSON));
+        const jsonToSend = rawFigmaJSON || fetchedFigmaJSON;
+        formData.append('figmaJSON', JSON.stringify(jsonToSend));
         formData.append('screenshot', screenshotInput.files[0]);
 
         // Show loading
@@ -2424,7 +2425,7 @@ document.addEventListener('DOMContentLoaded', () => {
               alert('Error comparing fields: ' + e.message);
             }
           } else {
-            if (!fetchedFigmaJSON) {
+            if (!rawFigmaJSON && !fetchedFigmaJSON) {
               console.log('No Figma data available for comparison');
               // Show a message to the user
               const noFigmaMsg = document.createElement('div');

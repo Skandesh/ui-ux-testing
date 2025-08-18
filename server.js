@@ -52,7 +52,15 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ storage: storage });
+const upload = multer({ 
+  storage: storage,
+  limits: {
+    fieldSize: 5 * 1024 * 1024,  // 5MB limit for field values (for large Figma JSON)
+    fileSize: 50 * 1024 * 1024,  // 50MB limit for uploaded files
+    fields: 20,                   // Maximum 20 fields
+    files: 10                     // Maximum 10 files
+  }
+});
 
 // Figma API proxy endpoint - token sent via header only
 app.get('/figma/fetch', async (req, res) => {

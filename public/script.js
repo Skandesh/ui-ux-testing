@@ -55,6 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Store fetched Figma data
   let fetchedFigmaJSON = null;
+  let rawFigmaJSON = null; // Store the raw JSON for server endpoints
   const screenshotPreview = document.getElementById('screenshotPreview');
   const loading = document.getElementById('loading');
   const results = document.getElementById('results');
@@ -158,13 +159,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const parsedData = JSON.parse(jsonText);
         console.log('JSON parsed successfully:', parsedData);
         
+        // Store the raw JSON for server endpoints
+        rawFigmaJSON = parsedData;
+        
         // Extract properties - pass the whole JSON to extractFigmaProperties
         // which now handles different formats internally
         let processedData;
         console.log('Processing Figma JSON structure...');
         const properties = extractFigmaProperties(parsedData);
         
-        // Determine what to use as the design data
+        // Determine what to use as the design data for display
         let designData;
         if (parsedData.nodes) {
           // For pasted JSON with nodes, use the first node's document
@@ -184,6 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
           formFields: properties.formFields || []
         };
         
+        // Store processed data for UI display
         fetchedFigmaJSON = processedData;
         parsedJSON = fetchedFigmaJSON;
         console.log('Processed data stored:', processedData);
@@ -260,6 +265,9 @@ document.addEventListener('DOMContentLoaded', () => {
           figmaCookie
         );
         if (response) {
+          // Store raw JSON for server endpoints
+          rawFigmaJSON = response.design || response;
+          
           // Handle new response structure
           if (response.design) {
             fetchedFigmaJSON = {
@@ -325,7 +333,7 @@ document.addEventListener('DOMContentLoaded', () => {
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
 
-        if (!fetchedFigmaJSON) {
+        if (!rawFigmaJSON && !fetchedFigmaJSON) {
           alert(
             'Please fetch a Figma design first using the Fetch Design button'
           );
@@ -354,7 +362,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const formData = new FormData();
-        formData.append('figmaJSON', JSON.stringify(fetchedFigmaJSON));
+        // Use raw JSON if available, otherwise use fetchedFigmaJSON
+        const jsonToSend = rawFigmaJSON || fetchedFigmaJSON;
+        formData.append('figmaJSON', JSON.stringify(jsonToSend));
         formData.append('screenshot', screenshotInput.files[0]);
 
         if (useAI) {
@@ -2786,7 +2796,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const elementCompareBtn = document.getElementById('elementCompareBtn');
   if (elementCompareBtn) {
     elementCompareBtn.addEventListener('click', async () => {
-      if (!fetchedFigmaJSON) {
+      if (!rawFigmaJSON && !fetchedFigmaJSON) {
         alert('Please fetch a Figma design first using the Fetch Design button');
         return;
       }
@@ -2798,7 +2808,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       
       const formData = new FormData();
-      formData.append('figmaJSON', JSON.stringify(fetchedFigmaJSON));
+      // Use raw JSON if available, otherwise use fetchedFigmaJSON
+      const jsonToSend = rawFigmaJSON || fetchedFigmaJSON;
+      formData.append('figmaJSON', JSON.stringify(jsonToSend));
       formData.append('screenshot', screenshotInput.files[0]);
       
       // Show loading

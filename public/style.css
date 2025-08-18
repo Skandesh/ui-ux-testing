@@ -319,35 +319,92 @@ textarea:focus {
     display: block;
 }
 
-.button-group {
-    display: flex;
-    gap: 15px;
-    margin-top: 20px;
+/* Comparison Method Section */
+.comparison-method-section {
+    margin-top: 30px;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+}
+
+.comparison-method-section h3 {
+    margin-bottom: 20px;
+    color: #495057;
+    font-size: 18px;
+    text-align: center;
+}
+
+.method-selection {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+}
+
+.method-option {
+    padding: 20px;
+    background: white;
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.method-option h4 {
+    margin-bottom: 10px;
+    color: #343a40;
+    font-size: 16px;
+}
+
+.method-option p {
+    margin-bottom: 15px;
+    color: #6c757d;
+    font-size: 14px;
+    line-height: 1.4;
 }
 
 .compare-btn {
-    flex: 1;
-    padding: 15px;
-    background: #3498db;
-    color: white;
+    width: 100%;
+    padding: 12px 20px;
     border: none;
     border-radius: 5px;
-    font-size: 16px;
-    font-weight: bold;
+    font-size: 14px;
+    font-weight: 500;
     cursor: pointer;
-    transition: background 0.3s;
+    transition: all 0.3s;
 }
 
-.compare-btn:hover {
-    background: #2980b9;
+.compare-btn.ai-compare-btn {
+    background: #007bff;
+    color: white;
 }
 
-.compare-btn.raw-btn {
-    background: #9b59b6;
+.compare-btn.ai-compare-btn:hover {
+    background: #0056b3;
 }
 
-.compare-btn.raw-btn:hover {
-    background: #8e44ad;
+.compare-btn.ocr-compare-btn {
+    background: #28a745;
+    color: white;
+}
+
+.compare-btn.ocr-compare-btn:hover {
+    background: #218838;
+}
+
+.compare-btn.basic-compare-btn {
+    background: #6c757d;
+    color: white;
+}
+
+.compare-btn.basic-compare-btn:hover {
+    background: #545b62;
+}
+
+/* Tool Separator */
+.tool-separator {
+    margin: 40px 0;
+    border: none;
+    border-top: 2px solid #dee2e6;
 }
 
 /* Loading */
@@ -2278,13 +2335,11 @@ textarea:focus {
     border-radius: 5px;
 }
 
-.element-btn {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-}
-
-.element-btn:hover {
-    opacity: 0.9;
+/* Responsive design for method selection */
+@media (max-width: 768px) {
+    .method-selection {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (max-width: 768px) {

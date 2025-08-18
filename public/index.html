@@ -130,19 +130,38 @@
                         </div>
                     </div>
                     
-                    <div class="button-group">
-                        <button type="submit" class="compare-btn">Compare Images</button>
-                        <button type="button" id="rawAnalyzeBtn" class="compare-btn raw-btn">Raw Analysis (No AI)</button>
-                        <button type="button" id="elementCompareBtn" class="compare-btn element-btn">Element Comparison (OCR)</button>
+                    <div class="comparison-method-section">
+                        <h3>Select Comparison Method</h3>
+                        <div class="method-selection">
+                            <div class="method-option">
+                                <h4>AI Comparison</h4>
+                                <p>Uses GPT-4 Vision or Gemini for visual analysis</p>
+                                <button type="submit" class="compare-btn ai-compare-btn">Run AI Comparison</button>
+                            </div>
+                            
+                            <div class="method-option">
+                                <h4>OCR Comparison</h4>
+                                <p>Uses Tesseract OCR for text extraction</p>
+                                <button type="button" id="elementCompareBtn" class="compare-btn ocr-compare-btn">Run OCR Comparison</button>
+                            </div>
+                            
+                            <div class="method-option">
+                                <h4>Basic Analysis</h4>
+                                <p>Pixel-by-pixel comparison without AI</p>
+                                <button type="button" id="rawAnalyzeBtn" class="compare-btn basic-compare-btn">Run Basic Analysis</button>
+                            </div>
+                        </div>
                     </div>
                 </form>
             </div>
         </div>
         
+        <hr class="tool-separator">
+        
         <!-- OpenAI Field Detection Tool -->
         <div class="field-detection-tool">
-            <h2>🔍 OpenAI Field Detection Tool</h2>
-            <p class="tool-description">Test what OpenAI detects in your UI screenshots</p>
+            <h2>AI Field Detection Tool</h2>
+            <p class="tool-description">Standalone tool to test AI vision detection capabilities</p>
             
             <div class="detection-upload-section">
                 <div class="detection-inputs">

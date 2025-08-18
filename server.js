@@ -5627,6 +5627,8 @@ async function extractAllTextFromScreenshot(screenshotPath) {
     // Verify the file exists
     if (!fs.existsSync(engDataPath)) {
       console.error('ERROR: eng.traineddata not found at:', engDataPath);
+      console.error('Please download the file with:');
+      console.error('curl -L https://github.com/tesseract-ocr/tessdata/raw/main/eng.traineddata -o tessdata/eng.traineddata');
       return {
         elements: [],
         lines: [],
@@ -5637,21 +5639,26 @@ async function extractAllTextFromScreenshot(screenshotPath) {
       };
     }
     
-    console.log('eng.traineddata found, size:', fs.statSync(engDataPath).size, 'bytes');
+    const fileSize = fs.statSync(engDataPath).size;
+    console.log('eng.traineddata found, size:', fileSize, 'bytes');
+    
+    // Check if file size is correct (should be ~23MB, not 5MB)
+    if (fileSize < 20000000) {
+      console.warn('WARNING: eng.traineddata seems too small. Expected ~23MB, got', Math.round(fileSize/1024/1024), 'MB');
+      console.warn('The file might be corrupted or wrong version. Re-download with:');
+      console.warn('curl -L https://github.com/tesseract-ocr/tessdata/raw/main/eng.traineddata -o tessdata/eng.traineddata');
+    }
     
     // Try simplified worker creation first
     try {
       console.log('Attempting simplified worker creation...');
       
-      // Method 1: Simplest approach with just options
-      // Try with file:// protocol for absolute path
-      const fileProtocolPath = `file://${tessdataPath}`;
-      console.log('Using langPath:', fileProtocolPath);
-      
+      // Method 1: Create worker without logger to avoid serialization issues
       worker = await Tesseract.createWorker({
-        langPath: fileProtocolPath,
+        langPath: tessdataPath,  // Use direct path without file:// protocol
         gzip: false,
-        logger: function(m) { console.log('Tesseract:', m.status); }
+        cacheMethod: 'none'
+        // Removed logger to avoid DataCloneError
       });
       
       console.log('Worker created, loading language...');
@@ -5672,20 +5679,22 @@ async function extractAllTextFromScreenshot(screenshotPath) {
           'eng',
           {
             langPath: tessdataPath,
-            gzip: false
+            gzip: false,
+            cacheMethod: 'none'
           }
         );
         console.log('Direct recognition successful');
         return processOCRData(data);
       } catch (directError) {
         console.error('Direct recognition also failed:', directError.message);
+        console.error('Make sure tessdata/eng.traineddata exists and is ~23MB');
         return {
           elements: [],
           lines: [],
           paragraphs: [],
           words: [],
           fullText: '',
-          error: 'All OCR methods failed. Check console for details.'
+          error: 'All OCR methods failed. Check tessdata/eng.traineddata (should be ~23MB)'
         };
       }
     }
